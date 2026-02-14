@@ -1,0 +1,19 @@
+{
+  "system_prompt": "You are a helpful coding assistant. Be concise.",
+  "model": "sonnet",
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "files_created": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "success": { "type": "boolean" }
+      },
+      "required": ["summary", "files_created", "success"]
+    }
+  }
+}
