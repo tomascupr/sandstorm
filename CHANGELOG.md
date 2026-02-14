@@ -2,6 +2,20 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.2.6] - 2026-02-14
+
+### Bug Fixes
+
+- rename package to match pyproject name for Nixpacks deployment
+
+### CI/CD
+
+- add lint, typecheck, and build verification workflow
+
+### Features
+
+- add Google Vertex AI support with GCP service account credentials (#4)
+
 ## [0.2.5] - 2026-02-14
 
 ### Documentation
