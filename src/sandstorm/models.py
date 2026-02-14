@@ -3,6 +3,12 @@ from posixpath import normpath
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+PROVIDER_TOGGLE_KEYS = (
+    "CLAUDE_CODE_USE_VERTEX",
+    "CLAUDE_CODE_USE_BEDROCK",
+    "CLAUDE_CODE_USE_FOUNDRY",
+)
+
 
 class QueryRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=1_000_000)
@@ -44,7 +50,8 @@ class QueryRequest(BaseModel):
         if not self.e2b_api_key:
             self.e2b_api_key = os.environ.get("E2B_API_KEY")
 
-        if not self.anthropic_api_key:
+        uses_alternate_provider = any(os.environ.get(k) for k in PROVIDER_TOGGLE_KEYS)
+        if not self.anthropic_api_key and not uses_alternate_provider:
             raise ValueError(
                 "anthropic_api_key is required — pass it in the request body "
                 "or set ANTHROPIC_API_KEY in the environment"

@@ -25,6 +25,9 @@ _RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
 # Path to project-level sandstorm config (resolved relative to this file)
 _CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "sandstorm.json"
 
+# Path inside the sandbox where GCP credentials are uploaded
+_GCP_CREDENTIALS_SANDBOX_PATH = "/home/user/.config/gcloud/service_account.json"
+
 # Provider env vars auto-forwarded from .env into the sandbox
 _PROVIDER_ENV_KEYS = [
     # Google Vertex AI
@@ -119,11 +122,33 @@ async def run_agent_in_sandbox(
                 _queue_full_warned = True
 
     # Build sandbox env vars: API key + any provider env vars from .env
-    sandbox_envs = {"ANTHROPIC_API_KEY": request.anthropic_api_key}
+    sandbox_envs = {}
+    if request.anthropic_api_key:
+        sandbox_envs["ANTHROPIC_API_KEY"] = request.anthropic_api_key
     for key in _PROVIDER_ENV_KEYS:
         val = os.environ.get(key)
         if val:
             sandbox_envs[key] = val
+
+    # Eagerly read GCP credentials file (TOCTOU fix: read now, upload later)
+    gcp_creds_content = None
+    if os.environ.get("CLAUDE_CODE_USE_VERTEX"):
+        gcp_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if not gcp_creds_path:
+            raise RuntimeError(
+                "GOOGLE_APPLICATION_CREDENTIALS is required when using Vertex AI — "
+                "set it in .env to the path of your GCP service account JSON key"
+            )
+        creds_file = Path(gcp_creds_path)
+        if not creds_file.is_absolute():
+            creds_file = _CONFIG_PATH.parent / creds_file
+        try:
+            gcp_creds_content = creds_file.read_text()
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"GOOGLE_APPLICATION_CREDENTIALS file not found: {gcp_creds_path}"
+            )
+        sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
 
     sandstorm_config = _load_sandstorm_config() or {}
 
@@ -173,6 +198,16 @@ async def run_agent_in_sandbox(
             "/home/user/.claude/settings.json",
             json.dumps(settings, indent=2),
         )
+
+        # Upload GCP credentials to the sandbox if Vertex AI is configured
+        if gcp_creds_content:
+            logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
+            await sbx.commands.run(
+                f"mkdir -p {posixpath.dirname(_GCP_CREDENTIALS_SANDBOX_PATH)}", timeout=5
+            )
+            await sbx.files.write(
+                _GCP_CREDENTIALS_SANDBOX_PATH, gcp_creds_content
+            )
 
         # Upload user files to the sandbox (path traversal prevented by model validation)
         if request.files:

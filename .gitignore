@@ -9,3 +9,7 @@ build/
 CLAUDE.md
 *.lock
 .vercel
+
+# GCP service account keys
+gcp-*.json
+.DS_Store
