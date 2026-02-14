@@ -10,7 +10,7 @@ class QueryRequest(BaseModel):
     e2b_api_key: str | None = None
     model: str | None = None
     max_turns: int | None = None
-    timeout: int = 300
+    timeout: int = Field(default=300, ge=5, le=3600)
     files: dict[str, str] | None = Field(
         None,
         description="Files to upload to the sandbox. Keys are relative paths under /home/user/.",
