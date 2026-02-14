@@ -249,15 +249,19 @@ curl -N -X POST https://your-sandstorm-host/query \
 
 ### Providers
 
-Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, and Microsoft Azure.
+Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Microsoft Azure, OpenRouter, and custom API proxies.
 
 | Provider | Key env vars |
 |----------|-------------|
 | **Vertex AI** | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` |
 | **Bedrock** | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | **Azure** | `CLAUDE_CODE_USE_FOUNDRY=1`, `AZURE_FOUNDRY_RESOURCE`, `AZURE_API_KEY` |
+| **OpenRouter** | `ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY` |
+| **Custom proxy** | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (optional) |
 
 Add the vars to `.env` and restart. The Claude Agent SDK detects them automatically and routes requests to the right provider.
+
+> **Note:** OpenRouter translates Anthropic API requests to other model formats. Non-Claude models may partially work for basic prompts, but tool use, streaming, and structured output depend on the model's compatibility with the Anthropic API protocol.
 
 ## API Reference
 
@@ -267,6 +271,7 @@ Add the vars to `.env` and restart. The Claude Agent SDK detects them automatica
 |-------|------|----------|---------|-------------|
 | `prompt` | `string` | Yes | -- | The task for the agent (min 1 char) |
 | `anthropic_api_key` | `string` | No | `$ANTHROPIC_API_KEY` | Anthropic key (falls back to env) |
+| `openrouter_api_key` | `string` | No | `$OPENROUTER_API_KEY` | OpenRouter key (falls back to env) |
 | `e2b_api_key` | `string` | No | `$E2B_API_KEY` | E2B key (falls back to env) |
 | `model` | `string` | No | from config | Overrides `sandstorm.json` model |
 | `max_turns` | `integer` | No | from config | Overrides `sandstorm.json` max_turns |

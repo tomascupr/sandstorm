@@ -41,6 +41,12 @@ async def health():
             "ANTHROPIC_API_KEY": "set"
             if os.environ.get("ANTHROPIC_API_KEY")
             else "not set",
+            "ANTHROPIC_BASE_URL": "set"
+            if os.environ.get("ANTHROPIC_BASE_URL")
+            else "not set",
+            "OPENROUTER_API_KEY": "set"
+            if os.environ.get("OPENROUTER_API_KEY")
+            else "not set",
             "E2B_API_KEY": "set" if os.environ.get("E2B_API_KEY") else "not set",
         },
     }

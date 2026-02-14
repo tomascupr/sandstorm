@@ -46,6 +46,7 @@ _PROVIDER_ENV_KEYS = [
     "AZURE_API_KEY",
     # Custom base URL (proxy, self-hosted)
     "ANTHROPIC_BASE_URL",
+    "ANTHROPIC_AUTH_TOKEN",
 ]
 
 
@@ -137,6 +138,14 @@ async def run_agent_in_sandbox(
         val = os.environ.get(key)
         if val:
             sandbox_envs[key] = val
+
+    # Per-request OpenRouter key overrides env var
+    if request.openrouter_api_key:
+        sandbox_envs["ANTHROPIC_AUTH_TOKEN"] = request.openrouter_api_key
+
+    # SDK requires ANTHROPIC_API_KEY to be present when using custom base URL
+    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get("ANTHROPIC_AUTH_TOKEN"):
+        sandbox_envs.setdefault("ANTHROPIC_API_KEY", "")
 
     # Eagerly read GCP credentials file (TOCTOU fix: read now, upload later)
     gcp_creds_content = None
