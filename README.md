@@ -1,19 +1,19 @@
 # Sandstorm
 
-**Deploying AI agents that can write files, run commands, and use tools sounds hard. It's not.**
+**Deploying AI agents that can write files, run commands, and use tools to the cloud sounds hard. It's not.**
 
 ```bash
-curl -N -X POST http://localhost:8000/query \
-  -d '{"prompt": "Build a REST API with FastAPI, add tests, and run them"}'
+curl -N -X POST https://your-sandstorm-host/query \
+  -d '{"prompt": "Scrape the top 50 YC companies from this batch, enrich each with Crunchbase funding data, save to a SQLite database, then generate a market map as a PNG and a CSV export"}'
 ```
 
-That's the entire integration. One POST request. The agent creates files, installs packages, writes tests, runs them, and streams every step back to you in real-time. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's the entire integration. One POST request. The agent installs dependencies, fetches live data, builds a database, generates files, and streams every step back to you in real-time. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
 Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes so you can give AI agents full system access without worrying about what they do with it. No Docker setup, no permission systems, no infrastructure to manage. Just a prompt in, results out.
 
 ## Why Sandstorm?
 
-Building agents that can actually *do things* — write to disk, execute code, install dependencies — typically means dealing with sandboxing, process isolation, permission management, and cleanup. Sandstorm reduces all of that to a single API call.
+Building agents that can actually *do things* — research the web, analyze data, process files, run scripts — typically means dealing with sandboxing, process isolation, permission management, and cleanup. Sandstorm reduces all of that to a single API call.
 
 - **Scales to zero effort** — no infra to manage, no containers to orchestrate, no cleanup to handle
 - **Full agent power** — Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch — all enabled by default
@@ -26,7 +26,7 @@ Building agents that can actually *do things* — write to disk, execute code, i
 ## Quickstart
 
 ```bash
-git clone https://github.com/your-org/sandstorm.git
+git clone https://github.com/tomascupr/sandstorm.git
 cd sandstorm
 uv sync
 
@@ -37,9 +37,9 @@ cp .env.example .env   # then edit with your keys
 uv run python -m uvicorn claude_sandbox.main:app --reload
 
 # Run your first agent
-curl -N -X POST http://localhost:8000/query \
+curl -N -X POST https://your-sandstorm-host/query \
   -H "Content-Type: application/json" \
-  -d '{"prompt": "Create hello.py that prints hello world, then run it"}'
+  -d '{"prompt": "Download the latest SEC 10-K filing for Tesla, extract all financial tables into CSVs, calculate YoY growth rates, and write a 2-page analysis report as a PDF"}'
 ```
 
 **Optional:** Build a custom E2B template for instant cold starts (otherwise the SDK is installed at runtime, ~15s overhead):
@@ -80,7 +80,7 @@ Drop a `sandstorm.json` in your project root to configure the agent's behavior. 
 
 ```json
 {
-  "system_prompt": "You are a senior Python developer. Be concise.",
+  "system_prompt": "You are a due diligence analyst. Write reports to /home/user/output/. Cite all sources.",
   "model": "sonnet",
   "max_turns": 20,
   "output_format": {
@@ -96,10 +96,10 @@ Drop a `sandstorm.json` in your project root to configure the agent's behavior. 
     }
   },
   "agents": {
-    "test-runner": {
-      "description": "Runs test suites and reports results.",
-      "prompt": "You are a test specialist. Run tests and report results clearly.",
-      "tools": ["Bash", "Read", "Grep"]
+    "web-scraper": {
+      "description": "Scrapes websites and saves structured data to files.",
+      "prompt": "Scrape the given URLs, extract structured data, and save results as JSON files.",
+      "tools": ["Bash", "WebFetch", "Write", "Read"]
     }
   },
   "mcp_servers": {
@@ -130,11 +130,11 @@ ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
 
 # Then just send prompts:
-curl -N -X POST http://localhost:8000/query \
-  -d '{"prompt": "Create a web scraper"}'
+curl -N -X POST https://your-sandstorm-host/query \
+  -d '{"prompt": "Crawl docs.stripe.com/api, extract every endpoint, and generate a complete OpenAPI spec as YAML"}'
 
 # Or override per-request:
-curl -N -X POST http://localhost:8000/query \
+curl -N -X POST https://your-sandstorm-host/query \
   -d '{"prompt": "...", "anthropic_api_key": "sk-ant-other", "e2b_api_key": "e2b_other"}'
 ```
 
@@ -213,26 +213,28 @@ Configure in `sandstorm.json` to get validated JSON instead of free-form text:
     "schema": {
       "type": "object",
       "properties": {
-        "issues": {
+        "companies": {
           "type": "array",
           "items": {
             "type": "object",
             "properties": {
-              "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] },
-              "file": { "type": "string" },
-              "description": { "type": "string" }
+              "name": { "type": "string" },
+              "funding_total": { "type": "number" },
+              "sector": { "type": "string" },
+              "url": { "type": "string" }
             },
-            "required": ["severity", "file", "description"]
+            "required": ["name", "funding_total", "sector"]
           }
-        }
+        },
+        "files_created": { "type": "array", "items": { "type": "string" } }
       },
-      "required": ["issues"]
+      "required": ["companies", "files_created"]
     }
   }
 }
 ```
 
-The agent works normally (reads files, runs commands), then returns validated JSON in `result.structured_output`.
+The agent works normally (scrapes data, installs packages, writes files), then returns validated JSON in `result.structured_output`.
 
 ### Subagents
 
@@ -241,16 +243,16 @@ Define specialized agents in `sandstorm.json` that the main agent can delegate t
 ```json
 {
   "agents": {
-    "security-reviewer": {
-      "description": "Security code review specialist.",
-      "prompt": "Find vulnerabilities, injection risks, and auth flaws.",
-      "tools": ["Read", "Grep", "Glob"],
+    "scraper": {
+      "description": "Crawls websites and saves structured data to disk.",
+      "prompt": "Scrape the target, extract structured data, and write results as JSON to /home/user/output/.",
+      "tools": ["Bash", "WebFetch", "Write", "Read"],
       "model": "sonnet"
     },
-    "test-runner": {
-      "description": "Runs and analyzes test suites.",
-      "prompt": "Run tests and report results with details on failures.",
-      "tools": ["Bash", "Read", "Grep"]
+    "report-writer": {
+      "description": "Reads collected data and produces formatted reports.",
+      "prompt": "Read all data files, synthesize findings, and generate a PDF report with charts.",
+      "tools": ["Bash", "Read", "Write", "Glob"]
     }
   }
 }
@@ -263,12 +265,12 @@ The main agent spawns subagents via the `Task` tool when it decides they're need
 Send files in the request for the agent to work with:
 
 ```bash
-curl -N -X POST http://localhost:8000/query \
+curl -N -X POST https://your-sandstorm-host/query \
   -d '{
-    "prompt": "Review this code for bugs and fix them",
+    "prompt": "Parse these server logs, correlate error spikes with deployment timestamps, identify root causes, and write an incident report to output/report.md with timeline charts saved as PNGs",
     "files": {
-      "app.py": "def divide(a, b):\n    return a / b\n",
-      "tests/test_app.py": "from app import divide\n\ndef test_zero():\n    assert divide(1, 0) == 0\n"
+      "logs/app.log": "2024-01-15T10:23:01Z ERROR [auth] connection pool exhausted\n2024-01-15T10:23:02Z ERROR [auth] connection pool exhausted\n...",
+      "logs/deploys.json": "[{\"sha\": \"a1b2c3\", \"timestamp\": \"2024-01-15T10:20:00Z\", \"service\": \"auth\"}]"
     }
   }'
 ```
@@ -316,8 +318,8 @@ from httpx_sse import connect_sse
 
 with httpx.Client() as client:
     with connect_sse(
-        client, "POST", "http://localhost:8000/query",
-        json={"prompt": "Create a Flask hello world app"},
+        client, "POST", "https://your-sandstorm-host/query",
+        json={"prompt": "Scrape the top 50 HN stories, enrich each with company data from their websites, cluster by sector, and save a ranked spreadsheet to output/hn_analysis.csv"},
     ) as events:
         for sse in events.iter_sse():
             print(sse.data)
@@ -326,10 +328,10 @@ with httpx.Client() as client:
 ### TypeScript
 
 ```typescript
-const res = await fetch("http://localhost:8000/query", {
+const res = await fetch("https://your-sandstorm-host/query", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({ prompt: "Create a React counter component" }),
+  body: JSON.stringify({ prompt: "Fetch the latest arxiv papers on LLM agents, download the PDFs, extract key findings from each, and compile a literature review as a markdown file with a summary table" }),
 });
 
 const reader = res.body!.getReader();
