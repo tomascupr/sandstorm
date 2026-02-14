@@ -4,11 +4,11 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
 
-**Spinning up 50 AI agents with in parallel - each scraping, analyzing, and reporting in its own isolated cloud sandbox, with files upload, structured output and MCPs included - sounds hard. It's not.**
+**Hundreds of AI agents running in parallel. Hours-long tasks. Tool use, file access, structured output — each in its own secure sandbox. Sounds hard. It's not.**
 
 ```bash
 curl -N -X POST https://your-sandstorm-host/query \
-  -d '{"prompt": "Scrape the top 50 YC companies, enrich with funding data, save as PNG + CSV"}'
+  -d '{"prompt": "Scrape the top 50 YC companies, enrich with funding data, save as PNG + CSV and contact founders on LinkedIn"}'
 ```
 
 That's the entire integration. One POST request. The agent installs dependencies, fetches live data, builds a database, generates files, and streams every step back to you in real-time. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
