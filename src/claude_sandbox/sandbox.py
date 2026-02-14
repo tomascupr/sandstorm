@@ -69,8 +69,7 @@ async def run_agent_in_sandbox(request: QueryRequest) -> AsyncGenerator[str, Non
             envs=sandbox_envs,
         )
         await sbx.commands.run(
-            "npm install -g @anthropic-ai/claude-code@latest"
-            " && mkdir -p /opt/agent-runner"
+            "mkdir -p /opt/agent-runner"
             " && cd /opt/agent-runner"
             " && npm init -y"
             " && npm install @anthropic-ai/claude-agent-sdk@latest",
