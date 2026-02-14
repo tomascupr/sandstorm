@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 import os
+import posixpath
+import shlex
 from collections.abc import AsyncGenerator
 from importlib.resources import files
 from pathlib import Path
@@ -98,8 +100,27 @@ async def run_agent_in_sandbox(request: QueryRequest) -> AsyncGenerator[str, Non
 
         # Upload user files to the sandbox (path traversal prevented by model validation)
         if request.files:
+            # Collect parent dirs that need creation (deduplicate, skip top-level files)
+            dirs_to_create: set[str] = set()
+            for path in request.files:
+                parent = posixpath.dirname(path)
+                if parent:  # non-empty means nested path like "src/main.py"
+                    dirs_to_create.add(f"/home/user/{parent}")
+
+            if dirs_to_create:
+                mkdir_cmd = " && ".join(
+                    f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
+                )
+                await sbx.commands.run(mkdir_cmd, timeout=10)
+
             for path, content in request.files.items():
-                await sbx.files.write(f"/home/user/{path}", content)
+                sandbox_path = f"/home/user/{path}"
+                try:
+                    await sbx.files.write(sandbox_path, content)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"Failed to upload file {path!r} to sandbox: {exc}"
+                    ) from exc
 
         # Upload runner script
         await sbx.files.write("/opt/agent-runner/runner.mjs", _RUNNER_SCRIPT)
