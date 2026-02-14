@@ -44,9 +44,13 @@ _PROVIDER_ENV_KEYS = [
     "CLAUDE_CODE_USE_FOUNDRY",
     "AZURE_FOUNDRY_RESOURCE",
     "AZURE_API_KEY",
-    # Custom base URL (proxy, self-hosted)
+    # Custom base URL (proxy, self-hosted, OpenRouter)
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
+    # Model name overrides (remap SDK aliases to provider model IDs)
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
 ]
 
 

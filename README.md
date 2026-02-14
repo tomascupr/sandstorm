@@ -256,12 +256,14 @@ Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Micros
 | **Vertex AI** | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` |
 | **Bedrock** | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
 | **Azure** | `CLAUDE_CODE_USE_FOUNDRY=1`, `AZURE_FOUNDRY_RESOURCE`, `AZURE_API_KEY` |
-| **OpenRouter** | `ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1`, `OPENROUTER_API_KEY` |
+| **OpenRouter** | `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `OPENROUTER_API_KEY` |
 | **Custom proxy** | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (optional) |
 
 Add the vars to `.env` and restart. The Claude Agent SDK detects them automatically and routes requests to the right provider.
 
-> **Note:** OpenRouter translates Anthropic API requests to other model formats. Non-Claude models may partially work for basic prompts, but tool use, streaming, and structured output depend on the model's compatibility with the Anthropic API protocol.
+The SDK uses internal model aliases (`sonnet`, `opus`, `haiku`). To remap these to OpenRouter model IDs, set `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, or `ANTHROPIC_DEFAULT_HAIKU_MODEL` in `.env`.
+
+> **Note:** The Claude Agent SDK validates model names internally. Non-Claude models (e.g. `qwen/qwen3-max-thinking`) are rejected by the SDK even when available on OpenRouter. Use model remapping env vars to route through Anthropic model names on OpenRouter (e.g. `ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4`).
 
 ## API Reference
 
