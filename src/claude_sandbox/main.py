@@ -68,4 +68,4 @@ async def query(request: QueryRequest):
         else:
             logger.info("[%s] Query completed", req_id)
 
-    return EventSourceResponse(event_generator())
+    return EventSourceResponse(event_generator(), ping=30)
