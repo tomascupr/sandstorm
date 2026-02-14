@@ -4,7 +4,7 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
 
-**Spinning up 50 AI agents in parallel -- each scraping, analyzing, and reporting in its own isolated cloud sandbox -- sounds hard. It's not.**
+**Spinning up 50 AI agents with in parallel - each scraping, analyzing, and reporting in its own isolated cloud sandbox, with files upload, structured output and MCPs included - sounds hard. It's not.**
 
 ```bash
 curl -N -X POST https://your-sandstorm-host/query \
