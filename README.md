@@ -263,7 +263,7 @@ Add the vars to `.env` and restart. The Claude Agent SDK detects them automatica
 
 The SDK uses internal model aliases (`sonnet`, `opus`, `haiku`). To remap these to OpenRouter model IDs, set `ANTHROPIC_DEFAULT_SONNET_MODEL`, `ANTHROPIC_DEFAULT_OPUS_MODEL`, or `ANTHROPIC_DEFAULT_HAIKU_MODEL` in `.env`.
 
-> **Note:** The Claude Agent SDK validates model names internally. Non-Claude models (e.g. `qwen/qwen3-max-thinking`) are rejected by the SDK even when available on OpenRouter. Use model remapping env vars to route through Anthropic model names on OpenRouter (e.g. `ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4`).
+> **Note:** When using OpenRouter, `ANTHROPIC_API_KEY` must be empty or unset. If a real Anthropic key is present alongside `ANTHROPIC_AUTH_TOKEN`, the SDK validates model names against Anthropic's API and rejects non-Claude models. Sandstorm handles this automatically — when both `ANTHROPIC_BASE_URL` and `OPENROUTER_API_KEY` are set, the Anthropic key is cleared in the sandbox.
 
 ## API Reference
 
