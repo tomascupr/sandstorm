@@ -4,6 +4,8 @@ from posixpath import normpath
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+_SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+
 PROVIDER_TOGGLE_KEYS = (
     "CLAUDE_CODE_USE_VERTEX",
     "CLAUDE_CODE_USE_BEDROCK",
@@ -40,13 +42,12 @@ class QueryRequest(BaseModel):
             raise ValueError(
                 f"Total skills size {total_size:,} bytes exceeds 5MB limit"
             )
-        name_pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
         for name in v:
             if not name:
                 raise ValueError("Skill name cannot be empty")
             if len(name) > 100:
                 raise ValueError(f"Skill name too long: {len(name)} chars (max 100)")
-            if not name_pattern.match(name):
+            if not _SKILL_NAME_PATTERN.match(name):
                 raise ValueError(
                     f"Invalid skill name {name!r}: only alphanumeric, hyphens, "
                     "and underscores allowed"

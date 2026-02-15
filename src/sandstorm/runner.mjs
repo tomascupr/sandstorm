@@ -32,7 +32,7 @@ const fieldMap = {
   allowed_tools: "allowedTools",
 };
 for (const [src, dst] of Object.entries(fieldMap)) {
-  if (config[src]) options[dst] = config[src];
+  if (config[src] !== undefined && config[src] !== null) options[dst] = config[src];
 }
 
 try {

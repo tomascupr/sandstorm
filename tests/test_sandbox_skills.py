@@ -67,6 +67,22 @@ class TestLoadSkillsDir:
         result = _load_skills_dir("skills")
         assert result == {}
 
+    def test_invalid_dir_names_skipped(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        skills_dir = tmp_path / "skills"
+        # Valid skill
+        valid = skills_dir / "good-skill"
+        valid.mkdir(parents=True)
+        (valid / "SKILL.md").write_text("valid")
+        # Invalid names that should be skipped
+        for bad_name in ["has space", "path..traversal", ".hidden"]:
+            bad = skills_dir / bad_name
+            bad.mkdir(parents=True)
+            (bad / "SKILL.md").write_text("should be skipped")
+
+        result = _load_skills_dir("skills")
+        assert result == {"good-skill": "valid"}
+
     def test_nonexistent_dir_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         result = _load_skills_dir("nonexistent")

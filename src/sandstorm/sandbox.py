@@ -26,6 +26,7 @@ SDK_VERSION = "0.2.42"
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
 _RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
+_SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 # Load the runner script that executes inside the sandbox
 _RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
@@ -105,13 +106,11 @@ def _validate_sandstorm_config(raw: dict) -> dict:
             logger.warning("sandstorm.json: unknown field %r — ignoring", key)
 
     # Post-loop validation for skills-related fields
-    name_pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
-
     if "skills" in validated:
         skills = validated["skills"]
         valid = True
         for name, content in skills.items():
-            if not name_pattern.match(name):
+            if not _SKILL_NAME_PATTERN.match(name):
                 logger.warning(
                     "sandstorm.json: invalid skill name %r — skipping skills", name
                 )
@@ -266,6 +265,9 @@ def _load_skills_dir(skills_dir: str) -> dict[str, str]:
     for entry in base.iterdir():
         if not entry.is_dir():
             continue
+        if not _SKILL_NAME_PATTERN.match(entry.name):
+            logger.warning("skills_dir: skipping %r (invalid name)", entry.name)
+            continue
         skill_file = entry / "SKILL.md"
         if skill_file.is_file():
             skills[entry.name] = skill_file.read_text()
@@ -388,6 +390,8 @@ async def run_agent_in_sandbox(
         settings: dict = {
             "permissions": {"allow": [], "deny": []},
         }
+        if not has_skills:
+            settings["env"] = {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}
         await sbx.commands.run("mkdir -p /home/user/.claude", timeout=5)
         await sbx.files.write(
             "/home/user/.claude/settings.json",
