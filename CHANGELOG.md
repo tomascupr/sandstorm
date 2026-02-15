@@ -2,10 +2,16 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
-## [0.3.0] - 2026-02-15
+## [0.4.0] - 2026-02-15
+
+### Features
+
+- add --file flag to CLI and update README (#11)
+- add pip-installable CLI with default query command (#10)
 
 ### Miscellaneous
 
+- update changelog and version for v0.3.0 (#9)
 - update changelog for v0.2.6
 
 ### Other
