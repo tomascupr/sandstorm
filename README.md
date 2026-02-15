@@ -19,7 +19,7 @@ That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/
 
 ### Why Sandstorm?
 
-Most companies want to use AI agents but hit the same wall: infrastructure, security concerns, and complexity. Sandstorm removes all three. It's a simplified, open-source version of the agent runtime we built at [duvo.ai](https://duvo.ai) — battle-tested in production, now available to everyone.
+Most companies want to use AI agents but hit the same wall: infrastructure, security concerns, and complexity. Sandstorm removes all three. It's a simplified, open-source version of the agent runtime we built at [duvo.ai](https://duvo.ai) — battle-tested in production.
 
 - **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
