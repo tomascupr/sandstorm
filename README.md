@@ -2,7 +2,7 @@
 
 Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
-[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk)
+[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
 [![PyPI](https://img.shields.io/pypi/v/duvo-sandstorm.svg)](https://pypi.org/project/duvo-sandstorm/)
@@ -15,7 +15,7 @@ Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
 ```
 
-That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's it. Sandstorm wraps the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
 ### Why Sandstorm?
 
@@ -41,20 +41,6 @@ If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
 
-## Table of Contents
-
-- [Quickstart](#quickstart)
-- [CLI](#cli)
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [OpenRouter](#openrouter)
-- [Configuration](#configuration)
-- [API Reference](#api-reference)
-- [Client Examples](#client-examples)
-- [Deployment](#deployment)
-- [Security](#security)
-- [Releasing](#releasing)
-
 ## Quickstart
 
 ### Prerequisites
@@ -74,20 +60,6 @@ pip install duvo-sandstorm
 git clone https://github.com/tomascupr/sandstorm.git
 cd sandstorm
 uv sync
-```
-
-### Setup
-
-```bash
-# Set your API keys
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
-
-# Run your first agent
-ds "Create hello.py that prints a colorful greeting and run it"
-
-# Or start the server for API access
-ds serve
 ```
 
 ### E2B Sandbox Template
@@ -179,25 +151,10 @@ Configure in `sandstorm.json` to get validated JSON instead of free-form text:
     "schema": {
       "type": "object",
       "properties": {
-        "companies": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "name": { "type": "string" },
-              "funding_total": { "type": "number" },
-              "sector": { "type": "string" },
-              "url": { "type": "string" }
-            },
-            "required": ["name", "funding_total", "sector"]
-          }
-        },
-        "files_created": {
-          "type": "array",
-          "items": { "type": "string" }
-        }
+        "summary": { "type": "string" },
+        "items": { "type": "array", "items": { "type": "object" } }
       },
-      "required": ["companies", "files_created"]
+      "required": ["summary", "items"]
     }
   }
 }
@@ -277,63 +234,15 @@ Attach external tools via [MCP](https://modelcontextprotocol.io) in `sandstorm.j
 
 ## OpenRouter
 
-Sandstorm works with any model available on [OpenRouter](https://openrouter.ai) -- not just Claude. Run agents powered by GPT-4o, Qwen, Llama, DeepSeek, Gemini, Mistral, or any of 300+ models, all through the same API.
-
-### Setup
-
-Add three env vars to `.env`:
+Use any of 300+ models (GPT-4o, Qwen, DeepSeek, Gemini, Llama) via [OpenRouter](https://openrouter.ai). Three env vars to set up:
 
 ```bash
 ANTHROPIC_BASE_URL=https://openrouter.ai/api
 OPENROUTER_API_KEY=sk-or-...
-ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4  # or any OpenRouter model ID
+ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4  # or any model ID
 ```
 
-That's it. The agent now routes through OpenRouter. Your existing `ANTHROPIC_API_KEY` can stay in `.env` -- Sandstorm automatically clears it in the sandbox when OpenRouter is active.
-
-### Using Open-Source Models
-
-Remap the SDK's model aliases to any OpenRouter model:
-
-```bash
-# Route "sonnet" to Qwen
-ANTHROPIC_DEFAULT_SONNET_MODEL=qwen/qwen3-max-thinking
-
-# Route "opus" to DeepSeek
-ANTHROPIC_DEFAULT_OPUS_MODEL=deepseek/deepseek-r1
-
-# Route "haiku" to a fast, cheap model
-ANTHROPIC_DEFAULT_HAIKU_MODEL=qwen/qwen3-30b-a3b
-```
-
-Then use the alias in your request or `sandstorm.json`:
-
-```bash
-curl -N -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Analyze this CSV and build a chart", "model": "sonnet"}'
-```
-
-The agent runs on Qwen, DeepSeek, or whatever you mapped -- with full tool use, file access, and streaming.
-
-### Per-Request Keys
-
-Pass `openrouter_api_key` in the request body for multi-tenant setups:
-
-```bash
-curl -N -X POST http://localhost:8000/query \
-  -d '{"prompt": "...", "openrouter_api_key": "sk-or-...", "model": "sonnet"}'
-```
-
-### How It Works
-
-The Claude Agent SDK supports custom API endpoints via `ANTHROPIC_BASE_URL`. OpenRouter exposes an Anthropic-compatible API, so the SDK sends requests to OpenRouter instead of Anthropic directly. OpenRouter then routes to whatever model you've configured. The `ANTHROPIC_DEFAULT_*_MODEL` env vars tell the SDK which model ID to send when you use aliases like `sonnet` or `opus`.
-
-### Compatibility
-
-Most models on OpenRouter support the core agent capabilities (tool use, streaming, multi-turn). Models with strong tool-use support (Claude, GPT-4o, Qwen, DeepSeek) work best. Smaller or older models may struggle with complex tool chains.
-
-Browse available models at [openrouter.ai/models](https://openrouter.ai/models).
+For model remapping, per-request keys, and compatibility details, see the [full OpenRouter guide](docs/openrouter.md).
 
 ## Configuration
 
@@ -346,17 +255,7 @@ Sandstorm uses a two-layer config system:
 
 ### `sandstorm.json`
 
-Drop a `sandstorm.json` in your project root to configure the agent's behavior:
-
-```json
-{
-  "system_prompt": "You are a due diligence analyst. Write reports to /home/user/output/.",
-  "model": "sonnet",
-  "max_turns": 20
-}
-```
-
-See [Structured Output](#structured-output), [Subagents](#subagents), and [MCP Servers](#mcp-servers) for advanced configuration.
+Drop a `sandstorm.json` in your project root. See [Structured Output](#structured-output), [Subagents](#subagents), and [MCP Servers](#mcp-servers) for feature-specific examples.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -471,70 +370,7 @@ while (true) {
 
 ## Deployment
 
-Sandstorm is a stateless FastAPI app. Each request creates an independent E2B sandbox, runs the agent, and tears it down. No shared state, no sticky sessions, no coordination between requests. This means deploying for concurrent agent runs is trivial -- just add workers.
-
-### Production Server
-
-For development or simple deployments, use the built-in server:
-
-```bash
-ds serve --host 0.0.0.0 --port 8000
-```
-
-For production with multiple workers, use [Gunicorn](https://gunicorn.org/) with uvicorn workers. Each worker handles multiple concurrent requests via async I/O:
-
-```bash
-pip install gunicorn
-gunicorn sandstorm.main:app \
-  --worker-class uvicorn.workers.UvicornWorker \
-  --workers 4 \
-  --bind 0.0.0.0:8000 \
-  --timeout 600
-```
-
-Set `--workers` based on your machine (2× CPU cores is a reasonable starting point). Set `--timeout` higher than your longest expected agent run.
-
-### Running Many Agents Concurrently
-
-Fire as many requests as you want. Each one gets its own sandbox:
-
-```python
-import asyncio
-import httpx
-from httpx_sse import aconnect_sse
-
-
-async def run_agent(client: httpx.AsyncClient, prompt: str):
-    async with aconnect_sse(
-        client, "POST", "http://localhost:8000/query",
-        json={"prompt": prompt},
-    ) as events:
-        async for sse in events.aiter_sse():
-            print(sse.data)
-
-
-async def main():
-    prompts = [
-        "Scrape the top 50 YC companies and save as CSV",
-        "Analyze Python dependency security for requests==2.31.0",
-        "Fetch today's arxiv papers on LLM agents and write a summary",
-        "Build a SQLite DB of US national parks from NPS.gov",
-    ]
-    async with httpx.AsyncClient(timeout=600) as client:
-        await asyncio.gather(*[run_agent(client, p) for p in prompts])
-
-asyncio.run(main())
-```
-
-All four agents run simultaneously in isolated sandboxes. They can't see each other. When one finishes, its VM is destroyed -- the others keep running.
-
-### Scaling
-
-The Sandstorm server does almost no work itself -- it just proxies between your client and E2B. The real compute happens in E2B's cloud VMs. This means:
-
-- **Horizontal scaling** -- run multiple Sandstorm instances behind a load balancer. No shared state to worry about.
-- **Bottleneck is E2B** -- your concurrent sandbox limit depends on your [E2B plan](https://e2b.dev/pricing). The free tier allows a handful; paid plans scale higher.
-- **CPU/memory on the server is minimal** -- each request holds an open SSE connection and streams stdout. A single 2-core machine can comfortably handle dozens of concurrent agents.
+Sandstorm is stateless -- each request creates an independent sandbox. No shared state, no sticky sessions. For production deployment with Gunicorn, concurrent agent execution, and scaling guidance, see the [deployment guide](docs/deployment.md).
 
 ### Docker
 
@@ -574,20 +410,6 @@ The repo includes `vercel.json` and `api/index.py` pre-configured. Set `ANTHROPI
 - **No persistence** -- nothing survives between requests
 
 > **Note:** The Anthropic API key is passed into the sandbox as an environment variable (the SDK requires it). The agent runs with `bypassPermissions` mode, so it has full access to the sandbox environment. Use per-request keys with spending limits for untrusted callers.
-
-## Releasing
-
-New versions are published to [PyPI](https://pypi.org/project/duvo-sandstorm/) automatically when a GitHub release is created.
-
-1. Update the version in `pyproject.toml` and `src/sandstorm/__init__.py`
-2. Commit and push to `main`
-3. Create a GitHub release:
-
-```bash
-gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes
-```
-
-The [publish workflow](.github/workflows/publish.yml) builds and uploads to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) -- no API tokens needed.
 
 ## License
 
