@@ -26,7 +26,7 @@ trim = true
 
 [git]
 conventional_commits = true
-filter_unconventional = true
+filter_unconventional = false
 split_commits = false
 commit_parsers = [
     { message = "^feat", group = "Features" },
@@ -39,6 +39,7 @@ commit_parsers = [
     { message = "^chore", group = "Miscellaneous" },
     { message = "^ci", group = "CI/CD" },
     { message = "^build", group = "Build" },
+    { message = ".*", group = "Other" },
 ]
 filter_commits = false
 tag_pattern = "v[0-9].*"

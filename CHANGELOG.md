@@ -2,6 +2,16 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.3.0] - 2026-02-15
+
+### Miscellaneous
+
+- update changelog for v0.2.6
+
+### Other
+
+- Add OpenRouter support
+
 ## [0.2.6] - 2026-02-14
 
 ### Bug Fixes
@@ -15,6 +25,11 @@ All notable changes to Sandstorm will be documented in this file.
 ### Features
 
 - add Google Vertex AI support with GCP service account credentials (#4)
+
+### Other
+
+- Add Claude Code GitHub Workflow (#5)
+- Revise README description for clarity and impact
 
 ## [0.2.5] - 2026-02-14
 
@@ -51,6 +66,13 @@ All notable changes to Sandstorm will be documented in this file.
 - update changelog for v0.2.0
 - pin claude-agent-sdk version for deterministic builds
 - add changelog via git-cliff
+
+### Other
+
+- Update README tagline with additional feature highlights (#2)
+- Add Deployment section to README (#1)
+- Overhaul README for scannability and impact
+- Update README with correct repo URL, hosted URLs, and complex agent examples
 
 ## [0.1.0] - 2026-02-14
 
