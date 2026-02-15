@@ -17,12 +17,18 @@ ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them
 
 That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
+### Why Sandstorm?
+
+Most companies want to use AI agents but hit the same wall: infrastructure, security concerns, and complexity. Sandstorm removes all three. It's a simplified, open-source version of the agent runtime we built at [duvo.ai](https://duvo.ai) — battle-tested in production, now available to everyone.
+
 - **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
 - **Safe by design** -- every request gets a fresh VM that's destroyed after, with zero state leakage
 - **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
 - **File uploads** -- send code, data, or configs for the agent to work with
+
+By the co-founder of [duvo.ai](https://duvo.ai) — inspired by our production agent infrastructure.
 
 ### Get Started
 
