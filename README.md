@@ -1,6 +1,6 @@
 # Sandstorm
 
-Run AI agents in secure cloud sandboxes. One API call. Zero infrastructure.
+Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
@@ -12,11 +12,10 @@ Run AI agents in secure cloud sandboxes. One API call. Zero infrastructure.
 **Hundreds of AI agents running in parallel. Hours-long tasks. Tool use, file access, structured output — each in its own secure sandbox. Sounds hard. It's not.**
 
 ```bash
-curl -N -X POST https://your-sandstorm-host/query \
-  -d '{"prompt": "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"}'
+ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
 ```
 
-That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
 - **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
@@ -29,8 +28,9 @@ That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://do
 
 ```bash
 pip install duvo-sandstorm
-cp .env.example .env   # add ANTHROPIC_API_KEY + E2B_API_KEY
-ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
+ds "Find the top 10 trending Python repos on GitHub and summarize each in one sentence"
 ```
 
 If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
@@ -76,10 +76,11 @@ uv sync
 
 ```bash
 # Set your API keys
-cp .env.example .env   # then edit with your keys
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
 
 # Run your first agent
-ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
+ds "Create hello.py that prints a colorful greeting and run it"
 
 # Or start the server for API access
 ds serve
@@ -122,7 +123,7 @@ ds "Compare these configs" -f prod.json -f staging.json
 ds "Review this code for bugs" -f src/main.py -f src/utils.py
 ```
 
-Files are uploaded to `/home/user/{filename}` before the agent starts.
+Files are uploaded to `/home/user/{filename}` before the agent starts. Only text files are supported; binary files must be sent via the [API](#file-uploads) instead.
 
 ### Start the server
 
