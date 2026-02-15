@@ -2,6 +2,26 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.4.5] - 2026-02-15
+
+### Bug Fixes
+
+- resolve version drift, health endpoint disclosure, and add tests
+- add Procfile for Nixpacks/Railpack deployments (#16)
+
+### Documentation
+
+- restructure README into scannable core + linked guides (#18)
+- add Why Sandstorm section with duvo.ai context (#14)
+
+### Features
+
+- add Claude Code Skills support for E2B sandbox (#20)
+
+### Refactoring
+
+- improve maintainability, simplification, and DRY across codebase (#15)
+
 ## [0.4.0] - 2026-02-15
 
 ### Features
@@ -11,6 +31,7 @@ All notable changes to Sandstorm will be documented in this file.
 
 ### Miscellaneous
 
+- update changelog and version for v0.4.0 (#13)
 - update changelog and version for v0.3.0 (#9)
 - update changelog for v0.2.6
 

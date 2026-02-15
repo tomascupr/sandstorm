@@ -1,6 +1,6 @@
 [project]
 name = "duvo-sandstorm"
-version = "0.4.0"
+version = "0.4.5"
 description = "Sandboxed Claude agents on demand. Run Claude Agent SDK in isolated E2B sandboxes and stream results via SSE."
 readme = "README.md"
 license = "MIT"
