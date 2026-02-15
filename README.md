@@ -2,7 +2,7 @@
 
 Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
-[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk)
+[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
 [![PyPI](https://img.shields.io/pypi/v/duvo-sandstorm.svg)](https://pypi.org/project/duvo-sandstorm/)
@@ -15,7 +15,7 @@ Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
 ```
 
-That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's it. Sandstorm wraps the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
 ### Why Sandstorm?
 
