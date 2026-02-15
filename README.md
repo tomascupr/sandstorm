@@ -15,7 +15,7 @@ Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
 ```
 
-That's it. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's it. Sandstorm wraps the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
 ### Why Sandstorm?
 
