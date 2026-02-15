@@ -203,6 +203,30 @@ curl -N -X POST https://your-sandstorm-host/query \
 
 Files are written to `/home/user/{path}` in the sandbox before the agent starts. From the CLI, use `-f` / `--file` instead (see [Upload files](#upload-files)).
 
+### Skills
+
+Skills give the agent reusable domain knowledge via [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills). Each skill is a folder with a `SKILL.md` file — Sandstorm uploads them into the sandbox before the agent starts, where they become available as `/slash-commands`.
+
+Create a skills directory with one subfolder per skill, each containing a `SKILL.md`:
+
+```
+.claude/skills/
+  code-review/
+    SKILL.md
+  data-analyst/
+    SKILL.md
+```
+
+Then point `skills_dir` in `sandstorm.json` to it:
+
+```json
+{
+  "skills_dir": ".claude/skills"
+}
+```
+
+Each skill becomes a slash command the agent can use — a folder named `data-analyst` registers as `/data-analyst`. Names must contain only letters, numbers, hyphens, and underscores.
+
 ### MCP Servers
 
 Attach external tools via [MCP](https://modelcontextprotocol.io) in `sandstorm.json`:
@@ -265,6 +289,8 @@ Drop a `sandstorm.json` in your project root. See [Structured Output](#structure
 | `output_format` | `object` | JSON schema for [structured output](#structured-output) |
 | `agents` | `object` | [Subagent](#subagents) definitions |
 | `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
+| `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
+| `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`). `"Skill"` is auto-added when skills are present |
 
 ### API Keys
 

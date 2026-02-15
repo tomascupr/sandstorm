@@ -17,8 +17,8 @@ const options = {
   cwd: config.cwd || "/home/user",
   permissionMode: "bypassPermissions",
   allowDangerouslySkipPermissions: true,
-  // Load user-level settings (permissions, env) from ~/.claude/settings.json
-  settingSources: ["user"],
+  // When skills are present, include "project" so the SDK discovers SKILL.md files
+  settingSources: config.has_skills ? ["user", "project"] : ["user"],
 };
 
 // Map snake_case config fields to camelCase SDK options
@@ -29,9 +29,10 @@ const fieldMap = {
   mcp_servers: "mcpServers",
   output_format: "outputFormat",
   agents: "agents",
+  allowed_tools: "allowedTools",
 };
 for (const [src, dst] of Object.entries(fieldMap)) {
-  if (config[src]) options[dst] = config[src];
+  if (config[src] !== undefined && config[src] !== null) options[dst] = config[src];
 }
 
 try {
