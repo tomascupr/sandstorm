@@ -205,9 +205,19 @@ Files are written to `/home/user/{path}` in the sandbox before the agent starts.
 
 ### Skills
 
-Skills are reusable instruction sets (SKILL.md files) that extend the agent with domain-specific knowledge and workflows. They follow the [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills) convention — Sandstorm automatically uploads them to `.claude/skills/<name>/SKILL.md` inside the sandbox before the agent starts.
+Skills give the agent reusable domain knowledge via [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills). Each skill is a folder with a `SKILL.md` file — Sandstorm uploads them into the sandbox before the agent starts, where they become available as `/slash-commands`.
 
-Point `skills_dir` in `sandstorm.json` to a directory of skill folders, each containing a `SKILL.md`:
+Create a skills directory with one subfolder per skill, each containing a `SKILL.md`:
+
+```
+.claude/skills/
+  code-review/
+    SKILL.md
+  data-analyst/
+    SKILL.md
+```
+
+Then point `skills_dir` in `sandstorm.json` to it:
 
 ```json
 {
@@ -215,26 +225,7 @@ Point `skills_dir` in `sandstorm.json` to a directory of skill folders, each con
 }
 ```
 
-Directory structure (subfolder name = skill name):
-
-```
-.claude/skills/
-  data-analyst/
-    SKILL.md
-  code-review/
-    SKILL.md
-```
-
-**Restricting tools with `allowed_tools`:**
-
-```json
-{
-  "skills_dir": ".claude/skills",
-  "allowed_tools": ["Bash", "Read", "Write", "WebFetch"]
-}
-```
-
-If `allowed_tools` is set and skills are present, `"Skill"` is automatically added to the list.
+Each skill becomes a slash command the agent can use — a folder named `data-analyst` registers as `/data-analyst`. Names must contain only letters, numbers, hyphens, and underscores.
 
 ### MCP Servers
 
@@ -299,7 +290,7 @@ Drop a `sandstorm.json` in your project root. See [Structured Output](#structure
 | `agents` | `object` | [Subagent](#subagents) definitions |
 | `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
 | `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
-| `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`) |
+| `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`). `"Skill"` is auto-added when skills are present |
 
 ### API Keys
 
