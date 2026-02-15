@@ -24,8 +24,6 @@ That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://do
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
 - **File uploads** -- send code, data, or configs for the agent to work with
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
-
 ### Get Started
 
 ```bash
@@ -35,6 +33,8 @@ uv sync && uv run python -m uvicorn sandstorm.main:app --reload
 ```
 
 If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
+
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
 
 ## Table of Contents
 
