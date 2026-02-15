@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import posixpath
+import re
 import shlex
 from collections.abc import AsyncGenerator
 from importlib.resources import files
@@ -74,6 +75,9 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "output_format": ((dict,), "dict"),
         "agents": ((dict, list), "dict or list"),
         "mcp_servers": ((dict,), "dict"),
+        "skills": ((dict,), "dict"),
+        "skills_dir": ((str,), "str"),
+        "allowed_tools": ((list,), "list"),
     }
 
     validated: dict = {}
@@ -99,6 +103,46 @@ def _validate_sandstorm_config(raw: dict) -> dict:
             validated[key] = value
         else:
             logger.warning("sandstorm.json: unknown field %r — ignoring", key)
+
+    # Post-loop validation for skills-related fields
+    name_pattern = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+    if "skills" in validated:
+        skills = validated["skills"]
+        valid = True
+        for name, content in skills.items():
+            if not name_pattern.match(name):
+                logger.warning(
+                    "sandstorm.json: invalid skill name %r — skipping skills", name
+                )
+                valid = False
+                break
+            if not isinstance(content, str):
+                logger.warning(
+                    "sandstorm.json: skill %r value must be a string, got %s — skipping skills",
+                    name,
+                    type(content).__name__,
+                )
+                valid = False
+                break
+        if not valid:
+            del validated["skills"]
+
+    if "skills_dir" in validated:
+        skills_dir_path = Path.cwd() / validated["skills_dir"]
+        if not skills_dir_path.is_dir():
+            logger.warning(
+                "sandstorm.json: skills_dir %r does not exist — ignoring",
+                validated["skills_dir"],
+            )
+            del validated["skills_dir"]
+
+    if "allowed_tools" in validated:
+        if not all(isinstance(t, str) for t in validated["allowed_tools"]):
+            logger.warning(
+                "sandstorm.json: allowed_tools entries must be strings — skipping"
+            )
+            del validated["allowed_tools"]
 
     return validated
 
@@ -213,6 +257,37 @@ async def _upload_files(
             ) from exc
 
 
+def _load_skills_dir(skills_dir: str) -> dict[str, str]:
+    """Read SKILL.md files from a host directory into {name: content} dict."""
+    base = Path.cwd() / skills_dir
+    skills: dict[str, str] = {}
+    if not base.is_dir():
+        return skills
+    for entry in base.iterdir():
+        if not entry.is_dir():
+            continue
+        skill_file = entry / "SKILL.md"
+        if skill_file.is_file():
+            skills[entry.name] = skill_file.read_text()
+    return skills
+
+
+async def _upload_skills(
+    sbx: AsyncSandbox, skills: dict[str, str], request_id: str
+) -> None:
+    """Upload skills to /home/user/.claude/skills/<name>/SKILL.md in the sandbox."""
+    logger.info("[%s] Uploading %d skills", request_id, len(skills))
+    for name, content in skills.items():
+        skill_dir = f"/home/user/.claude/skills/{name}"
+        await sbx.commands.run(f"mkdir -p {shlex.quote(skill_dir)}", timeout=5)
+        try:
+            await sbx.files.write(f"{skill_dir}/SKILL.md", content)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to upload skill {name!r} to sandbox: {exc}"
+            ) from exc
+
+
 async def _cleanup(
     task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str
 ) -> None:
@@ -298,16 +373,35 @@ async def run_agent_in_sandbox(
 
     task = None
     try:
+        # Merge skills from 3 sources: skills_dir (base) → config → request
+        merged_skills: dict[str, str] = {}
+        if sandstorm_config.get("skills_dir"):
+            merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
+        if sandstorm_config.get("skills"):
+            merged_skills.update(sandstorm_config["skills"])
+        if request.skills:
+            merged_skills.update(request.skills)
+
+        has_skills = bool(merged_skills)
+
         # Write Claude Agent SDK settings to the sandbox
-        settings = {
+        settings: dict = {
             "permissions": {"allow": [], "deny": []},
-            "env": {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"},
         }
         await sbx.commands.run("mkdir -p /home/user/.claude", timeout=5)
         await sbx.files.write(
             "/home/user/.claude/settings.json",
             json.dumps(settings, indent=2),
         )
+
+        # Upload skills to the sandbox
+        if merged_skills:
+            await _upload_skills(sbx, merged_skills, request_id)
+
+        # Auto-add "Skill" to allowed_tools if user set allowed_tools but forgot it
+        allowed_tools = sandstorm_config.get("allowed_tools")
+        if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
+            allowed_tools = [*allowed_tools, "Skill"]
 
         # Upload GCP credentials to the sandbox if Vertex AI is configured
         if gcp_creds_content:
@@ -337,6 +431,9 @@ async def run_agent_in_sandbox(
             "output_format": sandstorm_config.get("output_format"),
             "agents": sandstorm_config.get("agents"),
             "mcp_servers": sandstorm_config.get("mcp_servers"),
+            # Skills configuration
+            "has_skills": has_skills,
+            "allowed_tools": allowed_tools,
         }
         await sbx.files.write(
             "/opt/agent-runner/agent_config.json", json.dumps(agent_config)
