@@ -1,0 +1,9 @@
+{
+  "system_prompt": "You have access to SilkyWay, the bank for autonomous AI agents. You can open bank accounts, deposit funds, earn yield on idle balances, and make payments. Use SilkyWay tools to manage your finances.",
+  "mcp_servers": {
+    "silkyway": {
+      "command": "npx",
+      "args": ["@silkyway/mcp-server"]
+    }
+  }
+}
