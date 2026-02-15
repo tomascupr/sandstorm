@@ -38,18 +38,7 @@ app.add_middleware(
 
 @app.get("/health")
 async def health():
-    return {
-        "status": "ok",
-        "env": {
-            k: "set" if os.environ.get(k) else "not set"
-            for k in [
-                "ANTHROPIC_API_KEY",
-                "ANTHROPIC_BASE_URL",
-                "OPENROUTER_API_KEY",
-                "E2B_API_KEY",
-            ]
-        },
-    }
+    return {"status": "ok"}
 
 
 @app.post("/query")

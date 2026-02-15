@@ -13,8 +13,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
       - run: uv tool install ruff
-      - run: ruff check src/
-      - run: ruff format --check src/
+      - run: ruff check src/ tests/
+      - run: ruff format --check src/ tests/
 
   typecheck:
     name: Type Check
@@ -24,6 +24,15 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync
       - run: uv run --with pyright pyright src/sandstorm/
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/
 
   build:
     name: Build Verification
