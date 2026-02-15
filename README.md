@@ -13,7 +13,7 @@ curl -N -X POST https://your-sandstorm-host/query \
 
 That's the entire integration. One POST request. The agent installs dependencies, fetches live data, builds a database, generates files, and streams every step back to you in real-time. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
-Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes so you can give AI agents full system access without worrying about what they do with it. No Docker setup, no permission systems, no infrastructure to manage. Just a prompt in, results out.
+Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes so you can give AI agents full system access without worrying about what they do with it. Run Claude, or swap in any of 300+ models via [OpenRouter](https://openrouter.ai). No Docker setup, no permission systems, no infrastructure to manage. Just a prompt in, results out.
 
 - **Scales to zero effort** -- no infra to manage, no containers to orchestrate, no cleanup to handle
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
