@@ -8,6 +8,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sse_starlette.sse import EventSourceResponse
 
+from e2b import AuthenticationException, SandboxException
+
+from . import _LOG_DATEFMT, _LOG_FORMAT
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
 
@@ -15,8 +18,8 @@ load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+    format=_LOG_FORMAT,
+    datefmt=_LOG_DATEFMT,
 )
 logger = logging.getLogger(__name__)
 
@@ -38,16 +41,13 @@ async def health():
     return {
         "status": "ok",
         "env": {
-            "ANTHROPIC_API_KEY": "set"
-            if os.environ.get("ANTHROPIC_API_KEY")
-            else "not set",
-            "ANTHROPIC_BASE_URL": "set"
-            if os.environ.get("ANTHROPIC_BASE_URL")
-            else "not set",
-            "OPENROUTER_API_KEY": "set"
-            if os.environ.get("OPENROUTER_API_KEY")
-            else "not set",
-            "E2B_API_KEY": "set" if os.environ.get("E2B_API_KEY") else "not set",
+            k: "set" if os.environ.get(k) else "not set"
+            for k in [
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_BASE_URL",
+                "OPENROUTER_API_KEY",
+                "E2B_API_KEY",
+            ]
         },
     }
 
@@ -66,7 +66,7 @@ async def query(request: QueryRequest):
         try:
             async for line in run_agent_in_sandbox(request, req_id):
                 yield {"data": line}
-        except Exception as e:
+        except (RuntimeError, SandboxException, AuthenticationException) as e:
             logger.error("[%s] Query failed: %s", req_id, e, exc_info=True)
             yield {
                 "data": json.dumps(

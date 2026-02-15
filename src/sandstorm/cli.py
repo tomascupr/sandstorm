@@ -9,7 +9,7 @@ from pathlib import Path
 import click
 from dotenv import load_dotenv
 
-from sandstorm import __version__
+from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
 
 
 class _DefaultQueryGroup(click.Group):
@@ -122,8 +122,8 @@ def query(
 
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATEFMT,
         stream=sys.stderr,
     )
 
@@ -133,12 +133,19 @@ def query(
     files: dict[str, str] | None = None
     if file_paths:
         files = {}
+        cwd = Path.cwd()
         for fp in file_paths:
             p = Path(fp)
             try:
-                files[p.name] = p.read_text()
+                rel_path = p.relative_to(cwd)
+            except ValueError:
+                # File is outside CWD — use basename only
+                rel_path = Path(p.name)
+            key = str(rel_path)
+            try:
+                files[key] = p.read_text()
             except UnicodeDecodeError:
-                click.echo(f"Error: {p.name} is not a text file", err=True)
+                click.echo(f"Error: {key} is not a text file", err=True)
                 raise SystemExit(1)
 
     try:

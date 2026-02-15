@@ -21,12 +21,18 @@ const options = {
   settingSources: ["user"],
 };
 
-if (config.model) options.model = config.model;
-if (config.system_prompt) options.systemPrompt = config.system_prompt;
-if (config.max_turns) options.maxTurns = config.max_turns;
-if (config.mcp_servers) options.mcpServers = config.mcp_servers;
-if (config.output_format) options.outputFormat = config.output_format;
-if (config.agents) options.agents = config.agents;
+// Map snake_case config fields to camelCase SDK options
+const fieldMap = {
+  model: "model",
+  system_prompt: "systemPrompt",
+  max_turns: "maxTurns",
+  mcp_servers: "mcpServers",
+  output_format: "outputFormat",
+  agents: "agents",
+};
+for (const [src, dst] of Object.entries(fieldMap)) {
+  if (config[src]) options[dst] = config[src];
+}
 
 try {
   for await (const message of query({ prompt: config.prompt, options })) {

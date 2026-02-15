@@ -13,6 +13,8 @@ import os
 from dotenv import load_dotenv
 from e2b import Template
 
+from sandstorm.sandbox import SDK_VERSION
+
 load_dotenv()
 
 TEMPLATE_ALIAS = "sandstorm"
@@ -26,8 +28,7 @@ template = (
         "mkdir -p /opt/agent-runner"
         " && cd /opt/agent-runner"
         " && npm init -y"
-        # Pin SDK version for deterministic builds — update manually when needed
-        " && npm install @anthropic-ai/claude-agent-sdk@0.2.42"
+        f" && npm install @anthropic-ai/claude-agent-sdk@{SDK_VERSION}"
         " && chmod -R 777 /opt/agent-runner",
         user="root",
     )

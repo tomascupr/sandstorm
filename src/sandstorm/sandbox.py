@@ -16,8 +16,15 @@ logger = logging.getLogger(__name__)
 
 # Custom template with Agent SDK pre-installed (built via build_template.py).
 # Falls back to E2B's "claude-code" template + runtime install if custom not found.
-TEMPLATE = "work-43ca/sandstorm"
+TEMPLATE = os.environ.get("SANDSTORM_TEMPLATE", "work-43ca/sandstorm")
 FALLBACK_TEMPLATE = "claude-code"
+
+# Claude Agent SDK version — single source of truth (also imported by build_template.py)
+SDK_VERSION = "0.2.42"
+
+_QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
+_SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
+_RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
 
 # Load the runner script that executes inside the sandbox
 _RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
@@ -117,11 +124,130 @@ def _load_sandstorm_config() -> dict | None:
     return _validate_sandstorm_config(raw)
 
 
+def _read_gcp_credentials() -> str | None:
+    """Read GCP service account JSON if Vertex AI is configured."""
+    if not os.environ.get("CLAUDE_CODE_USE_VERTEX"):
+        return None
+
+    gcp_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not gcp_creds_path:
+        raise RuntimeError(
+            "GOOGLE_APPLICATION_CREDENTIALS is required when using Vertex AI — "
+            "set it in .env to the path of your GCP service account JSON key"
+        )
+    creds_file = Path(gcp_creds_path)
+    if not creds_file.is_absolute():
+        creds_file = Path.cwd() / creds_file
+    try:
+        return creds_file.read_text()
+    except FileNotFoundError:
+        raise RuntimeError(
+            f"GOOGLE_APPLICATION_CREDENTIALS file not found: {gcp_creds_path}"
+        )
+
+
+async def _create_sandbox(
+    api_key: str | None,
+    timeout: int,
+    envs: dict[str, str],
+    request_id: str,
+) -> AsyncSandbox:
+    """Create sandbox, falling back to base template + runtime SDK install."""
+    logger.info("[%s] Creating sandbox template=%s", request_id, TEMPLATE)
+    try:
+        sbx = await AsyncSandbox.create(
+            template=TEMPLATE,
+            api_key=api_key,
+            timeout=timeout,
+            envs=envs,
+        )
+    except NotFoundException:
+        logger.warning(
+            "[%s] Template %r not found, falling back to %r (adds ~15s overhead)",
+            request_id,
+            TEMPLATE,
+            FALLBACK_TEMPLATE,
+        )
+        sbx = await AsyncSandbox.create(
+            template=FALLBACK_TEMPLATE,
+            api_key=api_key,
+            timeout=timeout,
+            envs=envs,
+        )
+        await sbx.commands.run(
+            "mkdir -p /opt/agent-runner"
+            " && cd /opt/agent-runner"
+            " && npm init -y"
+            f" && npm install @anthropic-ai/claude-agent-sdk@{SDK_VERSION}",
+            timeout=_SDK_INSTALL_TIMEOUT,
+        )
+    logger.info("[%s] Sandbox created: %s", request_id, sbx.sandbox_id)
+    return sbx
+
+
+async def _upload_files(
+    sbx: AsyncSandbox, files: dict[str, str], request_id: str
+) -> None:
+    """Upload user files to the sandbox, creating parent directories as needed."""
+    logger.info("[%s] Uploading %d files", request_id, len(files))
+    # Collect parent dirs that need creation (deduplicate, skip top-level files)
+    dirs_to_create: set[str] = set()
+    for path in files:
+        parent = posixpath.dirname(path)
+        if parent:  # non-empty means nested path like "src/main.py"
+            dirs_to_create.add(f"/home/user/{parent}")
+
+    if dirs_to_create:
+        mkdir_cmd = " && ".join(
+            f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
+        )
+        await sbx.commands.run(mkdir_cmd, timeout=10)
+
+    for path, content in files.items():
+        sandbox_path = f"/home/user/{path}"
+        try:
+            await sbx.files.write(sandbox_path, content)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to upload file {path!r} to sandbox: {exc}"
+            ) from exc
+
+
+async def _cleanup(
+    task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str
+) -> None:
+    """Cancel the background command task and destroy the sandbox."""
+    # task may be None if an error occurred before create_task()
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+    elif task is not None:
+        # Task finished — suppress any command exit exception
+        try:
+            task.result()
+        except Exception:
+            logger.warning(
+                "[%s] Task exception suppressed (runner likely streamed the error)",
+                request_id,
+                exc_info=True,
+            )
+    logger.info("[%s] Destroying sandbox %s", request_id, sbx.sandbox_id)
+    await sbx.kill()
+
+
+def _to_str(data) -> str:
+    """Coerce callback data to str (E2B may pass non-string types)."""
+    return data if isinstance(data, str) else str(data)
+
+
 async def run_agent_in_sandbox(
     request: QueryRequest, request_id: str = ""
 ) -> AsyncGenerator[str, None]:
     """Create an E2B sandbox, run the Claude Agent SDK query(), and yield messages."""
-    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=10_000)
+    queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
     _queue_full_warned = False
 
     def _enqueue(data: str) -> None:
@@ -139,7 +265,7 @@ async def run_agent_in_sandbox(
                 _queue_full_warned = True
 
     # Build sandbox env vars: API key + any provider env vars from .env
-    sandbox_envs = {}
+    sandbox_envs: dict[str, str] = {}
     if request.anthropic_api_key:
         sandbox_envs["ANTHROPIC_API_KEY"] = request.anthropic_api_key
     for key in _PROVIDER_ENV_KEYS:
@@ -159,61 +285,16 @@ async def run_agent_in_sandbox(
     ):
         sandbox_envs["ANTHROPIC_API_KEY"] = ""
 
-    # Eagerly read GCP credentials file (TOCTOU fix: read now, upload later)
-    gcp_creds_content = None
-    if os.environ.get("CLAUDE_CODE_USE_VERTEX"):
-        gcp_creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if not gcp_creds_path:
-            raise RuntimeError(
-                "GOOGLE_APPLICATION_CREDENTIALS is required when using Vertex AI — "
-                "set it in .env to the path of your GCP service account JSON key"
-            )
-        creds_file = Path(gcp_creds_path)
-        if not creds_file.is_absolute():
-            creds_file = Path.cwd() / creds_file
-        try:
-            gcp_creds_content = creds_file.read_text()
-        except FileNotFoundError:
-            raise RuntimeError(
-                f"GOOGLE_APPLICATION_CREDENTIALS file not found: {gcp_creds_path}"
-            )
+    # Eagerly read GCP credentials (TOCTOU fix: read now, upload later)
+    gcp_creds_content = _read_gcp_credentials()
+    if gcp_creds_content:
         sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
 
     sandstorm_config = _load_sandstorm_config() or {}
 
-    logger.info("[%s] Creating sandbox template=%s", request_id, TEMPLATE)
-
-    try:
-        sbx = await AsyncSandbox.create(
-            template=TEMPLATE,
-            api_key=request.e2b_api_key,
-            timeout=request.timeout,
-            envs=sandbox_envs,
-        )
-    except NotFoundException:
-        # Custom template not found — fall back to default template + runtime SDK install
-        logger.warning(
-            "[%s] Template %r not found, falling back to %r (adds ~15s overhead)",
-            request_id,
-            TEMPLATE,
-            FALLBACK_TEMPLATE,
-        )
-        sbx = await AsyncSandbox.create(
-            template=FALLBACK_TEMPLATE,
-            api_key=request.e2b_api_key,
-            timeout=request.timeout,
-            envs=sandbox_envs,
-        )
-        await sbx.commands.run(
-            "mkdir -p /opt/agent-runner"
-            " && cd /opt/agent-runner"
-            " && npm init -y"
-            # Pin SDK version to match build_template.py
-            " && npm install @anthropic-ai/claude-agent-sdk@0.2.42",
-            timeout=120,
-        )
-
-    logger.info("[%s] Sandbox created: %s", request_id, sbx.sandbox_id)
+    sbx = await _create_sandbox(
+        request.e2b_api_key, request.timeout, sandbox_envs, request_id
+    )
 
     task = None
     try:
@@ -237,30 +318,9 @@ async def run_agent_in_sandbox(
             )
             await sbx.files.write(_GCP_CREDENTIALS_SANDBOX_PATH, gcp_creds_content)
 
-        # Upload user files to the sandbox (path traversal prevented by model validation)
+        # Upload user files (path traversal prevented by model validation)
         if request.files:
-            logger.info("[%s] Uploading %d files", request_id, len(request.files))
-            # Collect parent dirs that need creation (deduplicate, skip top-level files)
-            dirs_to_create: set[str] = set()
-            for path in request.files:
-                parent = posixpath.dirname(path)
-                if parent:  # non-empty means nested path like "src/main.py"
-                    dirs_to_create.add(f"/home/user/{parent}")
-
-            if dirs_to_create:
-                mkdir_cmd = " && ".join(
-                    f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
-                )
-                await sbx.commands.run(mkdir_cmd, timeout=10)
-
-            for path, content in request.files.items():
-                sandbox_path = f"/home/user/{path}"
-                try:
-                    await sbx.files.write(sandbox_path, content)
-                except Exception as exc:
-                    raise RuntimeError(
-                        f"Failed to upload file {path!r} to sandbox: {exc}"
-                    ) from exc
+            await _upload_files(sbx, request.files, request_id)
 
         # Upload runner script
         await sbx.files.write("/opt/agent-runner/runner.mjs", _RUNNER_SCRIPT)
@@ -290,19 +350,21 @@ async def run_agent_in_sandbox(
             agent_config.get("max_turns"),
         )
 
+        def _on_stdout(data):
+            _enqueue(_to_str(data))
+
+        def _on_stderr(data):
+            text = _to_str(data).strip()
+            if text:
+                _enqueue(json.dumps({"type": "stderr", "data": text}))
+
         async def run_command():
             try:
                 await sbx.commands.run(
                     "node /opt/agent-runner/runner.mjs",
-                    timeout=1800,
-                    on_stdout=lambda data: _enqueue(
-                        data if isinstance(data, str) else str(data)
-                    ),
-                    on_stderr=lambda data: (
-                        _enqueue(json.dumps({"type": "stderr", "data": s}))
-                        if (s := (data if isinstance(data, str) else str(data)).strip())
-                        else None
-                    ),
+                    timeout=_RUNNER_TIMEOUT,
+                    on_stdout=_on_stdout,
+                    on_stderr=_on_stderr,
                 )
             finally:
                 await queue.put(None)
@@ -319,23 +381,4 @@ async def run_agent_in_sandbox(
                 yield line
 
     finally:
-        # Cancel the background command task before destroying the sandbox.
-        # task may be None if an error occurred before create_task().
-        if task is not None and not task.done():
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
-        elif task is not None:
-            # Task finished — suppress any command exit exception
-            try:
-                task.result()
-            except Exception:
-                logger.warning(
-                    "[%s] Task exception suppressed (runner likely streamed the error)",
-                    request_id,
-                    exc_info=True,
-                )
-        logger.info("[%s] Destroying sandbox %s", request_id, sbx.sandbox_id)
-        await sbx.kill()
+        await _cleanup(task, sbx, request_id)

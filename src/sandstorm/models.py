@@ -53,11 +53,10 @@ class QueryRequest(BaseModel):
 
         uses_alternate_provider = any(os.environ.get(k) for k in PROVIDER_TOGGLE_KEYS)
         uses_custom_base_url = bool(os.environ.get("ANTHROPIC_BASE_URL"))
-        if (
-            not self.anthropic_api_key
-            and not uses_alternate_provider
-            and not uses_custom_base_url
-        ):
+        has_any_auth = (
+            self.anthropic_api_key or uses_alternate_provider or uses_custom_base_url
+        )
+        if not has_any_auth:
             raise ValueError(
                 "anthropic_api_key is required — pass it in the request body "
                 "or set ANTHROPIC_API_KEY in the environment"
