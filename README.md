@@ -25,6 +25,8 @@ Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents
 - **Any model via OpenRouter** -- run agents on Claude, GPT-4o, Qwen, Llama, DeepSeek, Gemini, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **BYOK** -- bring your own Anthropic, OpenRouter, or cloud provider keys, or set them once in `.env`
 
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
+
 ## Table of Contents
 
 - [Quickstart](#quickstart)
