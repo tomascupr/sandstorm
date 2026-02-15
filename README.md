@@ -28,8 +28,6 @@ Most companies want to use AI agents but hit the same wall: infrastructure, secu
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
 - **File uploads** -- send code, data, or configs for the agent to work with
 
-By the co-founder of [duvo.ai](https://duvo.ai) — inspired by our production agent infrastructure.
-
 ### Get Started
 
 ```bash
