@@ -5,6 +5,7 @@ Run AI agents in secure cloud sandboxes. One API call. Zero infrastructure.
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
+[![PyPI](https://img.shields.io/pypi/v/duvo-sandstorm.svg)](https://pypi.org/project/duvo-sandstorm/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -12,7 +13,7 @@ Run AI agents in secure cloud sandboxes. One API call. Zero infrastructure.
 
 ```bash
 curl -N -X POST https://your-sandstorm-host/query \
-  -d '{"prompt": "Find the top 10 trending Python repos on GitHub today, clone each one, count lines of code, and return a ranked summary as JSON"}'
+  -d '{"prompt": "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"}'
 ```
 
 That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
@@ -27,17 +28,9 @@ That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://do
 ### Get Started
 
 ```bash
-# Install from PyPI
 pip install duvo-sandstorm
-
-# Or from source
-git clone https://github.com/tomascupr/sandstorm.git && cd sandstorm
-uv sync
-```
-
-```bash
 cp .env.example .env   # add ANTHROPIC_API_KEY + E2B_API_KEY
-duvo-sandstorm serve    # or: uv run python -m uvicorn sandstorm.main:app --reload
+ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
 ```
 
 If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
@@ -56,15 +49,16 @@ If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr
 - [Client Examples](#client-examples)
 - [Deployment](#deployment)
 - [Security](#security)
+- [Releasing](#releasing)
 
 ## Quickstart
 
 ### Prerequisites
 
 - Python 3.11+
-- [uv](https://docs.astral.sh/uv/)
 - [E2B](https://e2b.dev) API key
 - [Anthropic](https://console.anthropic.com) API key or [OpenRouter](https://openrouter.ai) API key
+- [uv](https://docs.astral.sh/uv/) (only for source installs)
 
 ### Install
 
@@ -84,15 +78,11 @@ uv sync
 # Set your API keys
 cp .env.example .env   # then edit with your keys
 
-# Start the server
-duvo-sandstorm serve
-# Or with uvicorn directly
-uv run python -m uvicorn sandstorm.main:app --reload
-
 # Run your first agent
-curl -N -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Find the top 10 trending Python repos on GitHub and summarize each in one sentence"}'
+ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
+
+# Or start the server for API access
+ds serve
 ```
 
 ### E2B Sandbox Template
@@ -121,6 +111,18 @@ ds "Fetch data" --json-output | jq '.type'
 ```
 
 The explicit `query` subcommand also works: `ds query "Create hello.py"`.
+
+### Upload files
+
+Use `-f` / `--file` to send local files into the sandbox (repeatable):
+
+```bash
+ds "Analyze this data and find outliers" -f data.csv
+ds "Compare these configs" -f prod.json -f staging.json
+ds "Review this code for bugs" -f src/main.py -f src/utils.py
+```
+
+Files are uploaded to `/home/user/{filename}` before the agent starts.
 
 ### Start the server
 
@@ -237,7 +239,7 @@ curl -N -X POST https://your-sandstorm-host/query \
   }'
 ```
 
-Files are written to `/home/user/{path}` in the sandbox before the agent starts.
+Files are written to `/home/user/{path}` in the sandbox before the agent starts. From the CLI, use `-f` / `--file` instead (see [Upload files](#upload-files)).
 
 ### MCP Servers
 
@@ -471,7 +473,7 @@ Sandstorm is a stateless FastAPI app. Each request creates an independent E2B sa
 For development or simple deployments, use the built-in server:
 
 ```bash
-duvo-sandstorm serve --host 0.0.0.0 --port 8000
+ds serve --host 0.0.0.0 --port 8000
 ```
 
 For production with multiple workers, use [Gunicorn](https://gunicorn.org/) with uvicorn workers. Each worker handles multiple concurrent requests via async I/O:
@@ -537,7 +539,7 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir .  # or: pip install duvo-sandstorm
 EXPOSE 8000
-CMD ["duvo-sandstorm", "serve", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["ds", "serve", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ```bash
@@ -567,6 +569,20 @@ The repo includes `vercel.json` and `api/index.py` pre-configured. Set `ANTHROPI
 - **No persistence** -- nothing survives between requests
 
 > **Note:** The Anthropic API key is passed into the sandbox as an environment variable (the SDK requires it). The agent runs with `bypassPermissions` mode, so it has full access to the sandbox environment. Use per-request keys with spending limits for untrusted callers.
+
+## Releasing
+
+New versions are published to [PyPI](https://pypi.org/project/duvo-sandstorm/) automatically when a GitHub release is created.
+
+1. Update the version in `pyproject.toml` and `src/sandstorm/__init__.py`
+2. Commit and push to `main`
+3. Create a GitHub release:
+
+```bash
+gh release create vX.Y.Z --title "vX.Y.Z" --generate-notes
+```
+
+The [publish workflow](.github/workflows/publish.yml) builds and uploads to PyPI via [Trusted Publishing](https://docs.pypi.org/trusted-publishers/) -- no API tokens needed.
 
 ## License
 

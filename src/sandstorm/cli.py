@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import sys
+from pathlib import Path
 
 import click
 from dotenv import load_dotenv
@@ -97,6 +98,14 @@ def serve(host: str, port: int, reload: bool) -> None:
     default=None,
     help="OpenRouter API key [env: OPENROUTER_API_KEY].",
 )
+@click.option(
+    "--file",
+    "-f",
+    "file_paths",
+    multiple=True,
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+    help="File to upload to the sandbox (repeatable).",
+)
 def query(
     prompt: str,
     model: str | None,
@@ -106,6 +115,7 @@ def query(
     anthropic_api_key: str | None,
     e2b_api_key: str | None,
     openrouter_api_key: str | None,
+    file_paths: tuple[str, ...],
 ) -> None:
     """Run a one-off agent query in a sandbox."""
     load_dotenv()
@@ -120,13 +130,24 @@ def query(
     from .models import QueryRequest
     from .sandbox import run_agent_in_sandbox
 
+    files: dict[str, str] | None = None
+    if file_paths:
+        files = {}
+        for fp in file_paths:
+            p = Path(fp)
+            try:
+                files[p.name] = p.read_text()
+            except UnicodeDecodeError:
+                click.echo(f"Error: {p.name} is not a text file", err=True)
+                raise SystemExit(1)
+
     try:
         request = QueryRequest(
             prompt=prompt,
             model=model,
             max_turns=max_turns,
             timeout=timeout,
-            files=None,
+            files=files,
             anthropic_api_key=anthropic_api_key,
             e2b_api_key=e2b_api_key,
             openrouter_api_key=openrouter_api_key,
