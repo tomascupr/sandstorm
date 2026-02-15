@@ -150,7 +150,9 @@ async def run_agent_in_sandbox(
     # When using a custom base URL with auth token (e.g. OpenRouter), the SDK
     # must NOT receive a real ANTHROPIC_API_KEY — otherwise it validates model
     # names against Anthropic's API and rejects non-Claude models.
-    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get("ANTHROPIC_AUTH_TOKEN"):
+    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get(
+        "ANTHROPIC_AUTH_TOKEN"
+    ):
         sandbox_envs["ANTHROPIC_API_KEY"] = ""
 
     # Eagerly read GCP credentials file (TOCTOU fix: read now, upload later)
