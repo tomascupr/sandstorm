@@ -1,10 +1,7 @@
 import os
-import re
 from posixpath import normpath
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-_SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 PROVIDER_TOGGLE_KEYS = (
     "CLAUDE_CODE_USE_VERTEX",
@@ -25,34 +22,6 @@ class QueryRequest(BaseModel):
         None,
         description="Files to upload to the sandbox. Keys are relative paths under /home/user/.",
     )
-    skills: dict[str, str] | None = Field(
-        None,
-        description="Skills to upload. Keys are skill names, values are SKILL.md content.",
-    )
-
-    @field_validator("skills")
-    @classmethod
-    def validate_skills(cls, v: dict[str, str] | None) -> dict[str, str] | None:
-        if v is None:
-            return v
-        if len(v) > 50:
-            raise ValueError(f"Too many skills: {len(v)} (max 50)")
-        total_size = sum(len(content.encode()) for content in v.values())
-        if total_size > 5_000_000:  # 5MB
-            raise ValueError(
-                f"Total skills size {total_size:,} bytes exceeds 5MB limit"
-            )
-        for name in v:
-            if not name:
-                raise ValueError("Skill name cannot be empty")
-            if len(name) > 100:
-                raise ValueError(f"Skill name too long: {len(name)} chars (max 100)")
-            if not _SKILL_NAME_PATTERN.match(name):
-                raise ValueError(
-                    f"Invalid skill name {name!r}: only alphanumeric, hyphens, "
-                    "and underscores allowed"
-                )
-        return v
 
     @field_validator("files")
     @classmethod

@@ -155,7 +155,6 @@ def query(
             max_turns=max_turns,
             timeout=timeout,
             files=files,
-            skills=None,
             anthropic_api_key=anthropic_api_key,
             e2b_api_key=e2b_api_key,
             openrouter_api_key=openrouter_api_key,

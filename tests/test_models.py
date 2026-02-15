@@ -83,47 +83,6 @@ class TestFileValidation:
         assert "sub/dir/file.txt" in req.files
 
 
-class TestSkillsValidation:
-    def test_valid_skills_accepted(self):
-        req = QueryRequest(
-            prompt="test",
-            skills={"code-review": "---\nname: code-review\n---\nReview instructions"},
-        )
-        assert "code-review" in req.skills
-
-    def test_skills_none_by_default(self):
-        req = QueryRequest(prompt="test")
-        assert req.skills is None
-
-    def test_too_many_skills_rejected(self):
-        skills = {f"skill-{i}": "content" for i in range(51)}
-        with pytest.raises(ValidationError, match="Too many skills"):
-            QueryRequest(prompt="test", skills=skills)
-
-    def test_skills_total_size_limit(self):
-        big_content = "x" * 5_000_001
-        with pytest.raises(ValidationError, match="exceeds 5MB limit"):
-            QueryRequest(prompt="test", skills={"big": big_content})
-
-    def test_invalid_skill_name_rejected(self):
-        for name in ["has space", "path/slash", "..", ""]:
-            with pytest.raises(ValidationError):
-                QueryRequest(prompt="test", skills={name: "content"})
-
-    def test_skill_name_too_long_rejected(self):
-        with pytest.raises(ValidationError, match="too long"):
-            QueryRequest(prompt="test", skills={"a" * 101: "content"})
-
-    def test_valid_skill_names(self):
-        skills = {
-            "my-skill": "content",
-            "my_skill": "content",
-            "MySkill123": "content",
-        }
-        req = QueryRequest(prompt="test", skills=skills)
-        assert len(req.skills) == 3
-
-
 class TestTimeoutBounds:
     def test_default_timeout(self):
         req = QueryRequest(prompt="test")

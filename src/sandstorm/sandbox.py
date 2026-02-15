@@ -76,7 +76,6 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "output_format": ((dict,), "dict"),
         "agents": ((dict, list), "dict or list"),
         "mcp_servers": ((dict,), "dict"),
-        "skills": ((dict,), "dict"),
         "skills_dir": ((str,), "str"),
         "allowed_tools": ((list,), "list"),
     }
@@ -104,28 +103,6 @@ def _validate_sandstorm_config(raw: dict) -> dict:
             validated[key] = value
         else:
             logger.warning("sandstorm.json: unknown field %r — ignoring", key)
-
-    # Post-loop validation for skills-related fields
-    if "skills" in validated:
-        skills = validated["skills"]
-        valid = True
-        for name, content in skills.items():
-            if not _SKILL_NAME_PATTERN.match(name):
-                logger.warning(
-                    "sandstorm.json: invalid skill name %r — skipping skills", name
-                )
-                valid = False
-                break
-            if not isinstance(content, str):
-                logger.warning(
-                    "sandstorm.json: skill %r value must be a string, got %s — skipping skills",
-                    name,
-                    type(content).__name__,
-                )
-                valid = False
-                break
-        if not valid:
-            del validated["skills"]
 
     if "skills_dir" in validated:
         skills_dir_path = Path.cwd() / validated["skills_dir"]
@@ -375,14 +352,10 @@ async def run_agent_in_sandbox(
 
     task = None
     try:
-        # Merge skills from 3 sources: skills_dir (base) → config → request
+        # Load skills from skills_dir
         merged_skills: dict[str, str] = {}
         if sandstorm_config.get("skills_dir"):
             merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
-        if sandstorm_config.get("skills"):
-            merged_skills.update(sandstorm_config["skills"])
-        if request.skills:
-            merged_skills.update(request.skills)
 
         has_skills = bool(merged_skills)
 

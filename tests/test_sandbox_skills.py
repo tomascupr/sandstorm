@@ -2,22 +2,6 @@ from sandstorm.sandbox import _load_skills_dir, _validate_sandstorm_config
 
 
 class TestValidateSandstormConfigSkills:
-    def test_valid_skills_accepted(self):
-        config = _validate_sandstorm_config({"skills": {"my-skill": "skill content"}})
-        assert config["skills"] == {"my-skill": "skill content"}
-
-    def test_non_string_skill_value_dropped(self):
-        config = _validate_sandstorm_config({"skills": {"bad": {"content": "nested"}}})
-        assert "skills" not in config
-
-    def test_invalid_skill_name_dropped(self):
-        config = _validate_sandstorm_config({"skills": {"has space": "content"}})
-        assert "skills" not in config
-
-    def test_skills_wrong_type_dropped(self):
-        config = _validate_sandstorm_config({"skills": "not a dict"})
-        assert "skills" not in config
-
     def test_allowed_tools_valid(self):
         config = _validate_sandstorm_config(
             {"allowed_tools": ["Skill", "Read", "Bash"]}

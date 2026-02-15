@@ -205,20 +205,9 @@ Files are written to `/home/user/{path}` in the sandbox before the agent starts.
 
 ### Skills
 
-Skills are reusable instruction sets that extend the agent's capabilities. Define them inline in `sandstorm.json`, load from a directory, or pass per-request via the API.
+Skills are reusable instruction sets (SKILL.md files) that extend the agent with domain-specific knowledge and workflows. They follow the [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills) convention — Sandstorm automatically uploads them to `.claude/skills/<name>/SKILL.md` inside the sandbox before the agent starts.
 
-**Inline skills in `sandstorm.json`:**
-
-```json
-{
-  "skills": {
-    "code-review": "# Code Review\nReview code for bugs, security issues, and style.",
-    "testing": "# Testing\nWrite comprehensive unit and integration tests."
-  }
-}
-```
-
-**Load skills from a directory:**
+Point `skills_dir` in `sandstorm.json` to a directory of skill folders, each containing a `SKILL.md`:
 
 ```json
 {
@@ -226,35 +215,21 @@ Skills are reusable instruction sets that extend the agent's capabilities. Defin
 }
 ```
 
-The directory structure follows the Claude Code convention:
+Directory structure (subfolder name = skill name):
 
 ```
 .claude/skills/
+  data-analyst/
+    SKILL.md
   code-review/
     SKILL.md
-  testing/
-    SKILL.md
 ```
-
-**Per-request skills via the API:**
-
-```bash
-curl -N -X POST https://your-sandstorm-host/query \
-  -d '{
-    "prompt": "Review this code",
-    "skills": {
-      "code-review": "# Code Review\nCheck for bugs and security issues."
-    }
-  }'
-```
-
-Skills merge from all three sources with this priority: **request body > `sandstorm.json` inline > `skills_dir`**. When skills are present, the SDK's `settingSources` includes `"project"` so it discovers `SKILL.md` files, and `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS` is not set.
 
 **Restricting tools with `allowed_tools`:**
 
 ```json
 {
-  "skills": { "scraper": "# Scraper\nScrape websites." },
+  "skills_dir": ".claude/skills",
   "allowed_tools": ["Bash", "Read", "Write", "WebFetch"]
 }
 ```
@@ -323,7 +298,6 @@ Drop a `sandstorm.json` in your project root. See [Structured Output](#structure
 | `output_format` | `object` | JSON schema for [structured output](#structured-output) |
 | `agents` | `object` | [Subagent](#subagents) definitions |
 | `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
-| `skills` | `object` | Inline [skills](#skills) (`{name: "SKILL.md content"}`) |
 | `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
 | `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`) |
 
@@ -372,7 +346,6 @@ Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Micros
 | `max_turns` | `integer` | No | from config | Overrides `sandstorm.json` max_turns |
 | `timeout` | `integer` | No | `300` | Sandbox lifetime in seconds |
 | `files` | `object` | No | `null` | Files to upload (`{path: content}`) |
-| `skills` | `object` | No | `null` | [Skills](#skills) to upload (`{name: content}`) |
 
 **Response:** `text/event-stream`
 
