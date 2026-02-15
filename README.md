@@ -311,7 +311,7 @@ curl -N -X POST https://your-sandstorm-host/query \
 
 ### Providers
 
-Sandstorm supports multiple Claude providers. Add the env vars to `.env` and restart -- the SDK detects them automatically.
+Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Microsoft Azure, [OpenRouter](#openrouter), and custom API proxies. Add the env vars to `.env` and restart -- the SDK detects them automatically.
 
 | Provider | Key env vars |
 |----------|-------------|
