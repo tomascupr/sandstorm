@@ -27,9 +27,17 @@ That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://do
 ### Get Started
 
 ```bash
+# Install from PyPI
+pip install duvo-sandstorm
+
+# Or from source
 git clone https://github.com/tomascupr/sandstorm.git && cd sandstorm
+uv sync
+```
+
+```bash
 cp .env.example .env   # add ANTHROPIC_API_KEY + E2B_API_KEY
-uv sync && uv run python -m uvicorn sandstorm.main:app --reload
+duvo-sandstorm serve    # or: uv run python -m uvicorn sandstorm.main:app --reload
 ```
 
 If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
@@ -39,6 +47,7 @@ If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr
 ## Table of Contents
 
 - [Quickstart](#quickstart)
+- [CLI](#cli)
 - [How It Works](#how-it-works)
 - [Features](#features)
 - [OpenRouter](#openrouter)
@@ -57,17 +66,27 @@ If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr
 - [E2B](https://e2b.dev) API key
 - [Anthropic](https://console.anthropic.com) API key or [OpenRouter](https://openrouter.ai) API key
 
-### Setup
+### Install
 
 ```bash
+# From PyPI
+pip install duvo-sandstorm
+
+# Or from source
 git clone https://github.com/tomascupr/sandstorm.git
 cd sandstorm
 uv sync
+```
 
+### Setup
+
+```bash
 # Set your API keys
 cp .env.example .env   # then edit with your keys
 
 # Start the server
+duvo-sandstorm serve
+# Or with uvicorn directly
 uv run python -m uvicorn sandstorm.main:app --reload
 
 # Run your first agent
@@ -84,6 +103,44 @@ To customize the template (e.g. add system packages or pre-install other depende
 
 ```bash
 uv run python build_template.py
+```
+
+## CLI
+
+After installing, the `duvo-sandstorm` (or `ds`) command is available:
+
+### Run an agent
+
+The `query` command is the default — just pass a prompt directly:
+
+```bash
+ds "Create hello.py and run it"
+ds "Analyze this repo" --model opus
+ds "Build a chart" --max-turns 30 --timeout 600
+ds "Fetch data" --json-output | jq '.type'
+```
+
+The explicit `query` subcommand also works: `ds query "Create hello.py"`.
+
+### Start the server
+
+```bash
+ds serve                    # default: 0.0.0.0:8000
+ds serve --port 3000        # custom port
+ds serve --reload           # auto-reload for development
+```
+
+### API keys
+
+Keys are resolved in order: CLI flags > environment variables > `.env` file in current directory.
+
+```bash
+# Environment variables (most common)
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
+
+# Or CLI flags
+ds "hello" --anthropic-api-key sk-ant-... --e2b-api-key e2b_...
 ```
 
 ## How It Works
@@ -411,7 +468,13 @@ Sandstorm is a stateless FastAPI app. Each request creates an independent E2B sa
 
 ### Production Server
 
-Use [Gunicorn](https://gunicorn.org/) with uvicorn workers. Each worker handles multiple concurrent requests via async I/O:
+For development or simple deployments, use the built-in server:
+
+```bash
+duvo-sandstorm serve --host 0.0.0.0 --port 8000
+```
+
+For production with multiple workers, use [Gunicorn](https://gunicorn.org/) with uvicorn workers. Each worker handles multiple concurrent requests via async I/O:
 
 ```bash
 pip install gunicorn
@@ -472,11 +535,9 @@ The Sandstorm server does almost no work itself -- it just proxies between your 
 FROM python:3.12-slim
 WORKDIR /app
 COPY . .
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir .  # or: pip install duvo-sandstorm
 EXPOSE 8000
-CMD ["gunicorn", "sandstorm.main:app", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--workers", "4", "--bind", "0.0.0.0:8000", "--timeout", "600"]
+CMD ["duvo-sandstorm", "serve", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
 ```bash

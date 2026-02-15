@@ -22,8 +22,11 @@ FALLBACK_TEMPLATE = "claude-code"
 # Load the runner script that executes inside the sandbox
 _RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
 
-# Path to project-level sandstorm config (resolved relative to this file)
-_CONFIG_PATH = Path(__file__).resolve().parent.parent.parent / "sandstorm.json"
+
+def _get_config_path() -> Path:
+    """Resolve sandstorm.json from the current working directory."""
+    return Path.cwd() / "sandstorm.json"
+
 
 # Path inside the sandbox where GCP credentials are uploaded
 _GCP_CREDENTIALS_SANDBOX_PATH = "/home/user/.config/gcloud/service_account.json"
@@ -95,11 +98,12 @@ def _validate_sandstorm_config(raw: dict) -> dict:
 
 def _load_sandstorm_config() -> dict | None:
     """Load sandstorm.json from the project root if it exists."""
-    if not _CONFIG_PATH.exists():
+    config_path = _get_config_path()
+    if not config_path.exists():
         return None
 
     try:
-        raw = json.loads(_CONFIG_PATH.read_text())
+        raw = json.loads(config_path.read_text())
     except json.JSONDecodeError as exc:
         logger.error("sandstorm.json: invalid JSON — %s", exc)
         return None
@@ -166,7 +170,7 @@ async def run_agent_in_sandbox(
             )
         creds_file = Path(gcp_creds_path)
         if not creds_file.is_absolute():
-            creds_file = _CONFIG_PATH.parent / creds_file
+            creds_file = Path.cwd() / creds_file
         try:
             gcp_creds_content = creds_file.read_text()
         except FileNotFoundError:
