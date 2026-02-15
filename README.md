@@ -1,30 +1,40 @@
 # Sandstorm
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+Run AI agents in secure cloud sandboxes. One API call. Zero infrastructure.
+
+[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk)
+[![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Hundreds of AI agents running in parallel. Hours-long tasks. Tool use, file access, structured output — each in its own secure sandbox. Sounds hard. It's not.**
 
 ```bash
 curl -N -X POST https://your-sandstorm-host/query \
-  -d '{"prompt": "Scrape the top 50 YC companies, enrich with funding data, save as PNG + CSV and contact founders on LinkedIn"}'
+  -d '{"prompt": "Find the top 10 trending Python repos on GitHub today, clone each one, count lines of code, and return a ranked summary as JSON"}'
 ```
 
-That's the entire integration. One POST request. The agent installs dependencies, fetches live data, builds a database, generates files, and streams every step back to you in real-time. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+That's the entire integration. Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
 
-Sandstorm wraps the [Claude Agent SDK](https://docs.anthropic.com/en/docs/agents-and-tools/claude-agent-sdk) in isolated [E2B](https://e2b.dev) cloud sandboxes so you can give AI agents full system access without worrying about what they do with it. Run Anthropic models, or swap in any of 300+ models via [OpenRouter](https://openrouter.ai). No Docker setup, no permission systems, no infrastructure to manage. Just a prompt in, results out.
-
-- **Scales to zero effort** -- no infra to manage, no containers to orchestrate, no cleanup to handle
+- **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
 - **Safe by design** -- every request gets a fresh VM that's destroyed after, with zero state leakage
 - **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
 - **File uploads** -- send code, data, or configs for the agent to work with
-- **Any model via OpenRouter** -- run agents on Claude, GPT-4o, Qwen, Llama, DeepSeek, Gemini, or any of 300+ models through [OpenRouter](https://openrouter.ai)
-- **BYOK** -- bring your own Anthropic, OpenRouter, or cloud provider keys, or set them once in `.env`
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
+
+### Get Started
+
+```bash
+git clone https://github.com/tomascupr/sandstorm.git && cd sandstorm
+cp .env.example .env   # add ANTHROPIC_API_KEY + E2B_API_KEY
+uv sync && uv run python -m uvicorn sandstorm.main:app --reload
+```
+
+If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
 
 ## Table of Contents
 
