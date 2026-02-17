@@ -78,14 +78,14 @@ def init(app: FastAPI | None = None) -> None:
         return
 
     try:
-        from opentelemetry import trace, metrics
-        from opentelemetry.sdk.resources import Resource
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
-        from opentelemetry.sdk.metrics import MeterProvider
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
-        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        from opentelemetry import trace, metrics  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.resources import Resource  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.metrics import MeterProvider  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # type: ignore[reportMissingImports]
     except ImportError:
         logger.warning(
             "SANDSTORM_TELEMETRY=1 but OpenTelemetry packages are not installed. "
@@ -105,23 +105,23 @@ def init(app: FastAPI | None = None) -> None:
     # ── Exporter selection (gRPC default, HTTP/protobuf alt) ────────────
     protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
     if protocol == "http/protobuf":
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[reportMissingImports]
             OTLPSpanExporter,
         )
-        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
+        from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # type: ignore[reportMissingImports]
             OTLPMetricExporter,
         )
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import (
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (  # type: ignore[reportMissingImports]
             OTLPLogExporter,
         )
     else:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[reportMissingImports]
             OTLPSpanExporter,
         )
-        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # type: ignore[reportMissingImports]
             OTLPMetricExporter,
         )
-        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (
+        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (  # type: ignore[reportMissingImports]
             OTLPLogExporter,
         )
 
@@ -144,7 +144,7 @@ def init(app: FastAPI | None = None) -> None:
     # ── FastAPI auto-instrumentation ────────────────────────────────────
     if app is not None:
         try:
-            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore[reportMissingImports]
 
             FastAPIInstrumentor.instrument_app(app)
         except Exception:
@@ -202,7 +202,7 @@ def get_tracer():
     if _tracer is not None:
         return _tracer
     try:
-        from opentelemetry import trace
+        from opentelemetry import trace  # type: ignore[reportMissingImports]
 
         return trace.get_tracer("sandstorm")
     except ImportError:
@@ -216,7 +216,7 @@ def set_span_error(span: Any, error: BaseException) -> None:
     """Set span status to ERROR.  No-op when telemetry is disabled."""
     if not _ENABLED:
         return
-    from opentelemetry.trace import StatusCode
+    from opentelemetry.trace import StatusCode  # type: ignore[reportMissingImports]
 
     span.set_status(StatusCode.ERROR, str(error))
     span.record_exception(error)
