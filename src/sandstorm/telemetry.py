@@ -9,9 +9,8 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, TYPE_CHECKING
-
 from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -80,14 +79,23 @@ def init(app: FastAPI | None = None) -> None:
         return
 
     try:
-        from opentelemetry import trace, metrics  # type: ignore[reportMissingImports]
+        from opentelemetry import metrics, trace  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk._logs import (  # type: ignore[reportMissingImports]
+            LoggerProvider,
+            LoggingHandler,
+        )
+        from opentelemetry.sdk._logs.export import (
+            BatchLogRecordProcessor,  # type: ignore[reportMissingImports]
+        )
+        from opentelemetry.sdk.metrics import MeterProvider  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.metrics.export import (
+            PeriodicExportingMetricReader,  # type: ignore[reportMissingImports]
+        )
         from opentelemetry.sdk.resources import Resource  # type: ignore[reportMissingImports]
         from opentelemetry.sdk.trace import TracerProvider  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk.metrics import MeterProvider  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.trace.export import (
+            BatchSpanProcessor,  # type: ignore[reportMissingImports]
+        )
     except ImportError:
         logger.warning(
             "SANDSTORM_TELEMETRY=1 but OpenTelemetry packages are not installed. "
@@ -107,24 +115,24 @@ def init(app: FastAPI | None = None) -> None:
     # ── Exporter selection (gRPC default, HTTP/protobuf alt) ────────────
     protocol = os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", "grpc")
     if protocol == "http/protobuf":
-        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[reportMissingImports]
-            OTLPSpanExporter,
+        from opentelemetry.exporter.otlp.proto.http._log_exporter import (  # type: ignore[reportMissingImports]
+            OTLPLogExporter,
         )
         from opentelemetry.exporter.otlp.proto.http.metric_exporter import (  # type: ignore[reportMissingImports]
             OTLPMetricExporter,
         )
-        from opentelemetry.exporter.otlp.proto.http._log_exporter import (  # type: ignore[reportMissingImports]
-            OTLPLogExporter,
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import (  # type: ignore[reportMissingImports]
+            OTLPSpanExporter,
         )
     else:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[reportMissingImports]
-            OTLPSpanExporter,
+        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (  # type: ignore[reportMissingImports]
+            OTLPLogExporter,
         )
         from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # type: ignore[reportMissingImports]
             OTLPMetricExporter,
         )
-        from opentelemetry.exporter.otlp.proto.grpc._log_exporter import (  # type: ignore[reportMissingImports]
-            OTLPLogExporter,
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[reportMissingImports]
+            OTLPSpanExporter,
         )
 
     # ── Traces ──────────────────────────────────────────────────────────
@@ -146,7 +154,9 @@ def init(app: FastAPI | None = None) -> None:
     # ── FastAPI auto-instrumentation ────────────────────────────────────
     if app is not None:
         try:
-            from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore[reportMissingImports]
+            from opentelemetry.instrumentation.fastapi import (
+                FastAPIInstrumentor,  # type: ignore[reportMissingImports]
+            )
 
             FastAPIInstrumentor.instrument_app(app)
         except Exception:

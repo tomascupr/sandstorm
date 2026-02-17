@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -15,11 +16,11 @@ from e2b import AsyncSandbox, NotFoundException
 from .models import QueryRequest
 from .telemetry import (
     get_tracer,
+    record_agent_execution,
+    record_queue_drop,
     record_sandbox_creation,
     sandbox_started,
     sandbox_stopped,
-    record_agent_execution,
-    record_queue_drop,
 )
 
 logger = logging.getLogger(__name__)
@@ -123,12 +124,11 @@ def _validate_sandstorm_config(raw: dict) -> dict:
             )
             del validated["skills_dir"]
 
-    if "allowed_tools" in validated:
-        if not all(isinstance(t, str) for t in validated["allowed_tools"]):
-            logger.warning(
-                "sandstorm.json: allowed_tools entries must be strings — skipping"
-            )
-            del validated["allowed_tools"]
+    if "allowed_tools" in validated and not all(
+        isinstance(t, str) for t in validated["allowed_tools"]
+    ):
+        logger.warning("sandstorm.json: allowed_tools entries must be strings — skipping")
+        del validated["allowed_tools"]
 
     return validated
 
@@ -146,9 +146,7 @@ def load_sandstorm_config() -> dict | None:
         return None
 
     if not isinstance(raw, dict):
-        logger.error(
-            "sandstorm.json: expected a JSON object, got %s", type(raw).__name__
-        )
+        logger.error("sandstorm.json: expected a JSON object, got %s", type(raw).__name__)
         return None
 
     return _validate_sandstorm_config(raw)
@@ -170,10 +168,10 @@ def _read_gcp_credentials() -> str | None:
         creds_file = Path.cwd() / creds_file
     try:
         return creds_file.read_text()
-    except FileNotFoundError:
+    except FileNotFoundError as exc:
         raise RuntimeError(
             f"GOOGLE_APPLICATION_CREDENTIALS file not found: {gcp_creds_path}"
-        )
+        ) from exc
 
 
 async def _create_sandbox(
@@ -231,9 +229,7 @@ async def _create_sandbox(
         return sbx
 
 
-async def _upload_files(
-    sbx: AsyncSandbox, files: dict[str, str], request_id: str
-) -> None:
+async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: str) -> None:
     """Upload user files to the sandbox, creating parent directories as needed."""
     total_size = sum(len(c.encode()) for c in files.values())
     with get_tracer().start_as_current_span(
@@ -252,9 +248,7 @@ async def _upload_files(
                 dirs_to_create.add(f"/home/user/{parent}")
 
         if dirs_to_create:
-            mkdir_cmd = " && ".join(
-                f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
-            )
+            mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create))
             await sbx.commands.run(mkdir_cmd, timeout=10)
 
         try:
@@ -265,7 +259,10 @@ async def _upload_files(
                 ]
             )
         except Exception as exc:
-            raise RuntimeError(f"Failed to upload files to sandbox: {exc}") from exc
+            paths = ", ".join(files.keys())
+            raise RuntimeError(
+                f"Failed to upload {len(files)} files ({paths}) to sandbox: {exc}"
+            ) from exc
 
 
 def _load_skills_dir(skills_dir: str) -> dict[str, str]:
@@ -286,9 +283,7 @@ def _load_skills_dir(skills_dir: str) -> dict[str, str]:
     return skills
 
 
-async def _upload_skills(
-    sbx: AsyncSandbox, skills: dict[str, str], request_id: str
-) -> None:
+async def _upload_skills(sbx: AsyncSandbox, skills: dict[str, str], request_id: str) -> None:
     """Upload skills to /home/user/.claude/skills/<name>/SKILL.md in the sandbox."""
     with get_tracer().start_as_current_span(
         "sandbox.upload_skills",
@@ -311,12 +306,13 @@ async def _upload_skills(
                 ]
             )
         except Exception as exc:
-            raise RuntimeError(f"Failed to upload skills to sandbox: {exc}") from exc
+            names = ", ".join(skills.keys())
+            raise RuntimeError(
+                f"Failed to upload {len(skills)} skills ({names}) to sandbox: {exc}"
+            ) from exc
 
 
-async def _cleanup(
-    task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str
-) -> None:
+async def _cleanup(task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str) -> None:
     """Cancel the background command task and destroy the sandbox."""
     with get_tracer().start_as_current_span(
         "sandbox.cleanup",
@@ -325,10 +321,8 @@ async def _cleanup(
         # task may be None if an error occurred before create_task()
         if task is not None and not task.done():
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):
-                pass
         elif task is not None:
             # Task finished — suppress any command exit exception
             try:
@@ -363,12 +357,22 @@ async def run_agent_in_sandbox(
         except asyncio.QueueFull:
             record_queue_drop()
             if not _queue_full_warned:
+                _queue_full_warned = True
                 logger.warning(
                     "[%s] Queue full (maxsize=%d), dropping messages — consumer can't keep up",
                     request_id,
                     queue.maxsize,
                 )
-                _queue_full_warned = True
+                # Notify client via SSE so they know data was lost
+                with contextlib.suppress(asyncio.QueueFull):
+                    queue.put_nowait(
+                        json.dumps(
+                            {
+                                "type": "warning",
+                                "message": "Output buffer full, some messages may be dropped",
+                            }
+                        )
+                    )
 
     # Build sandbox env vars: API key + any provider env vars from .env
     sandbox_envs: dict[str, str] = {}
@@ -386,9 +390,7 @@ async def run_agent_in_sandbox(
     # When using a custom base URL with auth token (e.g. OpenRouter), the SDK
     # must NOT receive a real ANTHROPIC_API_KEY — otherwise it validates model
     # names against Anthropic's API and rejects non-Claude models.
-    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get(
-        "ANTHROPIC_AUTH_TOKEN"
-    ):
+    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get("ANTHROPIC_AUTH_TOKEN"):
         sandbox_envs["ANTHROPIC_API_KEY"] = ""
 
     # Eagerly read GCP credentials (TOCTOU fix: read now, upload later)
@@ -398,9 +400,7 @@ async def run_agent_in_sandbox(
 
     sandstorm_config = load_sandstorm_config() or {}
 
-    sbx = await _create_sandbox(
-        request.e2b_api_key, request.timeout, sandbox_envs, request_id
-    )
+    sbx = await _create_sandbox(request.e2b_api_key, request.timeout, sandbox_envs, request_id)
 
     task = None
     try:

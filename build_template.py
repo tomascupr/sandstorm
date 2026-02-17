@@ -9,6 +9,7 @@ Requires E2B_API_KEY in .env or environment.
 """
 
 import os
+import sys
 
 from dotenv import load_dotenv
 from e2b import Template
@@ -42,13 +43,21 @@ def on_log(log):
 print(f"Building template '{TEMPLATE_ALIAS}'...")
 print("This may take a few minutes on first build.\n")
 
+api_key = os.environ.get("E2B_API_KEY")
+if not api_key:
+    print(
+        "Error: E2B_API_KEY not set. Copy .env.example to .env and fill in your key.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 Template.build(
     template,
     alias=TEMPLATE_ALIAS,
     cpu_count=2,
     memory_mb=2048,
     on_build_logs=on_log,
-    api_key=os.environ["E2B_API_KEY"],
+    api_key=api_key,
 )
 
 print(f"\nTemplate '{TEMPLATE_ALIAS}' built successfully!")

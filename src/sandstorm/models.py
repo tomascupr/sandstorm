@@ -1,7 +1,7 @@
 import os
 from posixpath import normpath
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PROVIDER_TOGGLE_KEYS = (
     "CLAUDE_CODE_USE_VERTEX",
@@ -11,13 +11,44 @@ PROVIDER_TOGGLE_KEYS = (
 
 
 class QueryRequest(BaseModel):
-    prompt: str = Field(..., min_length=1, max_length=1_000_000)
-    anthropic_api_key: str | None = None
-    e2b_api_key: str | None = None
-    openrouter_api_key: str | None = None
-    model: str | None = None
-    max_turns: int | None = None
-    timeout: int = Field(default=300, ge=5, le=3600)
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [
+                {
+                    "prompt": "Create hello.py that prints 'Hello, world!' and run it",
+                    "model": "sonnet",
+                    "timeout": 300,
+                }
+            ]
+        }
+    )
+
+    prompt: str = Field(
+        ...,
+        min_length=1,
+        max_length=1_000_000,
+        description="The task for the agent to execute.",
+    )
+    anthropic_api_key: str | None = Field(
+        None, description="Anthropic API key. Falls back to ANTHROPIC_API_KEY env var."
+    )
+    e2b_api_key: str | None = Field(
+        None, description="E2B sandbox API key. Falls back to E2B_API_KEY env var."
+    )
+    openrouter_api_key: str | None = Field(
+        None,
+        description="OpenRouter API key. Falls back to OPENROUTER_API_KEY env var.",
+    )
+    model: str | None = Field(
+        None,
+        description="Model override (e.g. 'sonnet', 'opus'). Overrides sandstorm.json.",
+    )
+    max_turns: int | None = Field(
+        None, description="Max conversation turns. Overrides sandstorm.json."
+    )
+    timeout: int = Field(
+        default=300, ge=5, le=3600, description="Sandbox timeout in seconds (5-3600)."
+    )
     files: dict[str, str] | None = Field(
         None,
         description="Files to upload to the sandbox. Keys are relative paths under /home/user/.",
@@ -53,9 +84,7 @@ class QueryRequest(BaseModel):
 
         uses_alternate_provider = any(os.environ.get(k) for k in PROVIDER_TOGGLE_KEYS)
         uses_custom_base_url = bool(os.environ.get("ANTHROPIC_BASE_URL"))
-        has_any_auth = (
-            self.anthropic_api_key or uses_alternate_provider or uses_custom_base_url
-        )
+        has_any_auth = self.anthropic_api_key or uses_alternate_provider or uses_custom_base_url
         if not has_any_auth:
             raise ValueError(
                 "anthropic_api_key is required — pass it in the request body "
