@@ -256,6 +256,27 @@ Attach external tools via [MCP](https://modelcontextprotocol.io) in `sandstorm.j
 | `headers` | `object` | Auth headers for remote servers |
 | `env` | `object` | Environment variables |
 
+### Webhooks
+
+Track sandbox lifecycle events (created, updated, killed) via E2B webhooks. Add `webhook_url` to `sandstorm.json` for zero-config setup — the server auto-registers on startup and deregisters on shutdown:
+
+```json
+{
+  "webhook_url": "https://your-server.com"
+}
+```
+
+Or manage manually via CLI:
+
+```bash
+ds webhook register https://your-server.com   # auto-appends /webhooks/e2b, saves secret to .env
+ds webhook test https://your-server.com/webhooks/e2b  # verify endpoint
+ds webhook list                                # list registered webhooks
+ds webhook delete <id>                         # remove a webhook
+```
+
+Set `SANDSTORM_WEBHOOK_SECRET` to enable HMAC-SHA256 signature verification. The `register` command auto-generates and saves the secret to `.env` if not already set.
+
 ## Examples
 
 Ready-to-use configs for common use cases — `cd` into any example and run:
@@ -304,6 +325,7 @@ Drop a `sandstorm.json` in your project root. See [Structured Output](#structure
 | `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
 | `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
 | `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`). `"Skill"` is auto-added when skills are present |
+| `webhook_url` | `string` | Public URL for E2B lifecycle webhooks. Server auto-registers on startup, deregisters on shutdown |
 
 ### API Keys
 
@@ -352,6 +374,10 @@ Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Micros
 | `files` | `object` | No | `null` | Files to upload (`{path: content}`) |
 
 **Response:** `text/event-stream`
+
+### `POST /webhooks/e2b`
+
+Receives E2B sandbox lifecycle events (created, updated, killed). Verifies HMAC-SHA256 signature when `SANDSTORM_WEBHOOK_SECRET` is set. Used automatically when `webhook_url` is configured in `sandstorm.json`.
 
 ### `GET /health`
 

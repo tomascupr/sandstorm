@@ -54,6 +54,7 @@ _agent_execution_duration = None
 _active_sandboxes = None
 _error_counter = None
 _queue_drop_counter = None
+_webhook_event_counter = None
 
 
 def _is_enabled() -> bool:
@@ -73,6 +74,7 @@ def init(app: FastAPI | None = None) -> None:
     global _request_counter, _request_duration  # noqa: PLW0603
     global _sandbox_creation_duration, _agent_execution_duration  # noqa: PLW0603
     global _active_sandboxes, _error_counter, _queue_drop_counter  # noqa: PLW0603
+    global _webhook_event_counter  # noqa: PLW0603
 
     if not _is_enabled():
         return
@@ -188,6 +190,11 @@ def init(app: FastAPI | None = None) -> None:
         unit="1",
         description="Messages dropped due to full queue",
     )
+    _webhook_event_counter = meter.create_counter(
+        "sandstorm.webhook.events",
+        unit="1",
+        description="E2B webhook events received",
+    )
 
     _ENABLED = True
     _tracer = trace.get_tracer("sandstorm", __version__)
@@ -263,3 +270,8 @@ def record_error(*, error_type: str = "") -> None:
 def record_queue_drop() -> None:
     if _queue_drop_counter:
         _queue_drop_counter.add(1)
+
+
+def record_webhook_event(*, event_type: str = "") -> None:
+    if _webhook_event_counter:
+        _webhook_event_counter.add(1, {"sandstorm.webhook.event_type": event_type})

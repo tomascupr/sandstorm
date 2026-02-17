@@ -87,6 +87,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "mcp_servers": ((dict,), "dict"),
         "skills_dir": ((str,), "str"),
         "allowed_tools": ((list,), "list"),
+        "webhook_url": ((str,), "str"),
     }
 
     validated: dict = {}
@@ -132,7 +133,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
     return validated
 
 
-def _load_sandstorm_config() -> dict | None:
+def load_sandstorm_config() -> dict | None:
     """Load sandstorm.json from the project root if it exists."""
     config_path = _get_config_path()
     if not config_path.exists():
@@ -395,7 +396,7 @@ async def run_agent_in_sandbox(
     if gcp_creds_content:
         sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
 
-    sandstorm_config = _load_sandstorm_config() or {}
+    sandstorm_config = load_sandstorm_config() or {}
 
     sbx = await _create_sandbox(
         request.e2b_api_key, request.timeout, sandbox_envs, request_id

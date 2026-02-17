@@ -26,6 +26,7 @@ def _reset_telemetry(monkeypatch):
     monkeypatch.setattr(telemetry_mod, "_active_sandboxes", None)
     monkeypatch.setattr(telemetry_mod, "_error_counter", None)
     monkeypatch.setattr(telemetry_mod, "_queue_drop_counter", None)
+    monkeypatch.setattr(telemetry_mod, "_webhook_event_counter", None)
 
 
 # ── Disabled state (always run) ─────────────────────────────────────────────
@@ -68,6 +69,7 @@ class TestDisabledState:
         telemetry_mod.sandbox_stopped()
         telemetry_mod.record_error(error_type="RuntimeError")
         telemetry_mod.record_queue_drop()
+        telemetry_mod.record_webhook_event(event_type="sandbox.started")
 
 
 class TestMissingPackages:
@@ -122,6 +124,7 @@ class TestEnabledState:
         assert telemetry_mod._active_sandboxes is not None
         assert telemetry_mod._error_counter is not None
         assert telemetry_mod._queue_drop_counter is not None
+        assert telemetry_mod._webhook_event_counter is not None
 
     def test_get_tracer_returns_recording(self):
         telemetry_mod.init()
@@ -149,3 +152,4 @@ class TestEnabledState:
         telemetry_mod.sandbox_stopped()
         telemetry_mod.record_error(error_type="SandboxException")
         telemetry_mod.record_queue_drop()
+        telemetry_mod.record_webhook_event(event_type="sandbox.started")

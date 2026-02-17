@@ -16,6 +16,16 @@ class TestValidateSandstormConfigSkills:
         config = _validate_sandstorm_config({"allowed_tools": "not a list"})
         assert "allowed_tools" not in config
 
+    def test_webhook_url_valid(self):
+        config = _validate_sandstorm_config(
+            {"webhook_url": "https://example.com/webhooks/e2b"}
+        )
+        assert config["webhook_url"] == "https://example.com/webhooks/e2b"
+
+    def test_webhook_url_wrong_type_dropped(self):
+        config = _validate_sandstorm_config({"webhook_url": 123})
+        assert "webhook_url" not in config
+
     def test_skills_dir_nonexistent_dropped(self):
         config = _validate_sandstorm_config(
             {"skills_dir": "/nonexistent/path/to/skills"}

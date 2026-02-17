@@ -231,20 +231,25 @@ def webhook() -> None:
     help="Webhook signature secret [env: SANDSTORM_WEBHOOK_SECRET].",
 )
 @click.option("--e2b-api-key", default=None, help="E2B API key [env: E2B_API_KEY].")
-def webhook_register(url: str, secret: str | None, e2b_api_key: str | None) -> None:
+@click.option("--no-save", is_flag=True, help="Don't write secret to .env file.")
+def webhook_register(
+    url: str, secret: str | None, e2b_api_key: str | None, no_save: bool
+) -> None:
     """Register an E2B lifecycle webhook.
 
     URL is the public endpoint (e.g. https://your-server.com/webhooks/e2b).
     """
     load_dotenv()
     api_key = _get_e2b_api_key(e2b_api_key)
+
+    if not url.rstrip("/").endswith("/webhooks/e2b"):
+        url = url.rstrip("/") + "/webhooks/e2b"
+        click.echo(f"Using webhook URL: {url}", err=True)
+
     secret = secret or os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
     if not secret:
         secret = secrets.token_hex(32)
         click.echo(f"Generated webhook secret: {secret}", err=True)
-        click.echo(
-            "Set SANDSTORM_WEBHOOK_SECRET to this value on your server.", err=True
-        )
 
     payload: dict = {
         "name": "sandstorm",
@@ -260,6 +265,13 @@ def webhook_register(url: str, secret: str | None, e2b_api_key: str | None) -> N
 
     result = _webhook_request("POST", "", api_key, payload)
     click.echo(f"Webhook registered: {json.dumps(result, indent=2)}")
+
+    if not no_save:
+        from dotenv import set_key
+
+        env_path = str(Path.cwd() / ".env")
+        set_key(env_path, "SANDSTORM_WEBHOOK_SECRET", secret)
+        click.echo("Saved SANDSTORM_WEBHOOK_SECRET to .env", err=True)
 
 
 @webhook.command("list")
@@ -290,3 +302,45 @@ def webhook_delete(webhook_id: str, e2b_api_key: str | None) -> None:
     api_key = _get_e2b_api_key(e2b_api_key)
     _webhook_request("DELETE", f"/{webhook_id}", api_key)
     click.echo(f"Webhook {webhook_id} deleted.")
+
+
+@webhook.command("test")
+@click.argument("url")
+@click.option(
+    "--secret",
+    default=None,
+    help="Webhook signature secret [env: SANDSTORM_WEBHOOK_SECRET].",
+)
+def webhook_test(url: str, secret: str | None) -> None:
+    """Send a test event to a webhook endpoint to verify it's reachable."""
+    load_dotenv()
+    secret = secret or os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
+
+    payload = json.dumps(
+        {
+            "type": "sandbox.lifecycle.test",
+            "sandboxId": "test-sandbox-000",
+            "eventData": {"sandbox_metadata": {"request_id": "test0000"}},
+        }
+    ).encode()
+
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        import hashlib
+        import hmac
+
+        sig = hmac.new(secret.encode(), payload, hashlib.sha256).hexdigest()
+        headers["e2b-signature"] = f"sha256={sig}"
+
+    req = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            body = resp.read().decode(errors="replace")
+            click.echo(f"✓ {resp.status}: {body}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")
+        click.echo(f"✗ {exc.code}: {detail}", err=True)
+        raise SystemExit(1)
+    except urllib.error.URLError as exc:
+        click.echo(f"✗ Unreachable: {exc.reason}", err=True)
+        raise SystemExit(1)
