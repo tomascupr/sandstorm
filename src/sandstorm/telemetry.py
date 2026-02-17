@@ -84,17 +84,17 @@ def init(app: FastAPI | None = None) -> None:
             LoggerProvider,
             LoggingHandler,
         )
-        from opentelemetry.sdk._logs.export import (
-            BatchLogRecordProcessor,  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk._logs.export import (  # type: ignore[reportMissingImports]
+            BatchLogRecordProcessor,
         )
         from opentelemetry.sdk.metrics import MeterProvider  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk.metrics.export import (
-            PeriodicExportingMetricReader,  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.metrics.export import (  # type: ignore[reportMissingImports]
+            PeriodicExportingMetricReader,
         )
         from opentelemetry.sdk.resources import Resource  # type: ignore[reportMissingImports]
         from opentelemetry.sdk.trace import TracerProvider  # type: ignore[reportMissingImports]
-        from opentelemetry.sdk.trace.export import (
-            BatchSpanProcessor,  # type: ignore[reportMissingImports]
+        from opentelemetry.sdk.trace.export import (  # type: ignore[reportMissingImports]
+            BatchSpanProcessor,
         )
     except ImportError:
         logger.warning(
@@ -154,8 +154,8 @@ def init(app: FastAPI | None = None) -> None:
     # ── FastAPI auto-instrumentation ────────────────────────────────────
     if app is not None:
         try:
-            from opentelemetry.instrumentation.fastapi import (
-                FastAPIInstrumentor,  # type: ignore[reportMissingImports]
+            from opentelemetry.instrumentation.fastapi import (  # type: ignore[reportMissingImports]
+                FastAPIInstrumentor,
             )
 
             FastAPIInstrumentor.instrument_app(app)
