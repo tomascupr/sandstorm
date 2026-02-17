@@ -44,7 +44,8 @@
             "properties": {
               "feature": { "type": "string" }
             },
-            "required": ["feature"]
+            "required": ["feature"],
+            "additionalProperties": { "type": "string" }
           },
           "description": "Feature-by-feature comparison with dynamic competitor columns"
         },
