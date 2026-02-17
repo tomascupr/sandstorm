@@ -185,7 +185,7 @@ async def e2b_webhook(request: Request):
 
         event_type = payload.get("type", "unknown")
         sandbox_id = payload.get("sandboxId", "unknown")
-        metadata = payload.get("eventData", {}).get("sandbox_metadata", {}) or {}
+        metadata = (payload.get("eventData") or {}).get("sandbox_metadata") or {}
         request_id = metadata.get("request_id", "unknown")
 
         span.set_attribute("sandstorm.webhook.event_type", event_type)
