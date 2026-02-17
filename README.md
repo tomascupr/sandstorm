@@ -256,6 +256,19 @@ Attach external tools via [MCP](https://modelcontextprotocol.io) in `sandstorm.j
 | `headers` | `object` | Auth headers for remote servers |
 | `env` | `object` | Environment variables |
 
+## Examples
+
+Ready-to-use configs for common use cases — `cd` into any example and run:
+
+| Example | What it does | Key features |
+|---------|-------------|--------------|
+| [Code Reviewer](examples/code-reviewer/) | Structured code review with severity ratings | `output_format`, `allowed_tools` |
+| [Competitive Analysis](examples/competitive-analysis/) | Research and compare competitors | `output_format`, WebFetch, WebSearch |
+| [Content Brief](examples/content-brief/) | Generate content briefs with SEO research | `output_format`, WebSearch |
+| [Security Auditor](examples/security-auditor/) | Multi-agent security audit with OWASP skill | `agents`, `skills_dir`, `output_format` |
+
+See [examples/](examples/) for the full feature matrix and usage guide.
+
 ## OpenRouter
 
 Use any of 300+ models (GPT-4o, Qwen, DeepSeek, Gemini, Llama) via [OpenRouter](https://openrouter.ai). Three env vars to set up:

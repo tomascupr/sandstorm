@@ -1,0 +1,63 @@
+{
+  "system_prompt": "You are a strategic market analyst. When given companies or a market segment, research each competitor by fetching their websites, analyzing their positioning, pricing, features, and strengths/weaknesses. Be data-driven and specific — cite what you find on their sites rather than relying on general knowledge.",
+  "model": "sonnet",
+  "max_turns": 20,
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "market_segment": {
+          "type": "string",
+          "description": "The market or product category being analyzed"
+        },
+        "competitors": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "website": { "type": "string" },
+              "positioning": { "type": "string" },
+              "target_audience": { "type": "string" },
+              "key_features": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "pricing_model": { "type": "string" },
+              "strengths": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "weaknesses": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["name", "website", "positioning", "key_features", "strengths", "weaknesses"]
+          }
+        },
+        "comparison_matrix": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "feature": { "type": "string" }
+            },
+            "required": ["feature"]
+          },
+          "description": "Feature-by-feature comparison with dynamic competitor columns"
+        },
+        "market_insights": {
+          "type": "string",
+          "description": "Key trends, gaps, and opportunities in the market"
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["market_segment", "competitors", "market_insights"]
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "system_prompt": "You are a content strategist. When given a topic and optionally a target audience, research the topic using web search to understand: what's currently ranking, what angles competitors are taking, what questions people ask, and what gaps exist in existing content. Produce a comprehensive content brief that a writer can immediately act on.",
+  "model": "sonnet",
+  "max_turns": 15,
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "title_options": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "3-5 title variations optimized for click-through"
+        },
+        "target_audience": {
+          "type": "string",
+          "description": "Who this content is for"
+        },
+        "primary_keyword": { "type": "string" },
+        "secondary_keywords": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "search_intent": {
+          "type": "string",
+          "description": "Informational, transactional, navigational, or commercial"
+        },
+        "recommended_word_count": { "type": "integer" },
+        "outline": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "heading": { "type": "string" },
+              "subpoints": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "key_points": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["heading", "key_points"]
+          }
+        },
+        "competitor_content": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "url": { "type": "string" },
+              "angle": { "type": "string" },
+              "gap": { "type": "string" }
+            },
+            "required": ["title", "url", "angle", "gap"]
+          }
+        },
+        "unique_angle": {
+          "type": "string",
+          "description": "The differentiated perspective this content should take"
+        },
+        "cta_suggestion": { "type": "string" }
+      },
+      "required": ["title_options", "target_audience", "primary_keyword", "outline", "unique_angle"]
+    }
+  }
+}

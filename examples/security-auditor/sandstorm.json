@@ -1,0 +1,75 @@
+{
+  "system_prompt": "You are a security team lead. Coordinate your specialized sub-agents to perform a comprehensive security audit of the provided codebase. Delegate dependency scanning, code analysis, and configuration review to the appropriate agents, then synthesize their findings into a unified report with prioritized remediation steps.",
+  "model": "sonnet",
+  "skills_dir": ".claude/skills",
+  "allowed_tools": ["Read", "Glob", "Grep", "Bash", "Task"],
+  "agents": {
+    "dependency-scanner": {
+      "description": "Checks dependencies for known vulnerabilities and outdated packages",
+      "prompt": "Scan dependency files (requirements.txt, package.json, Cargo.toml, go.mod, etc.) for known CVEs and outdated packages. Run package audit commands where available (pip audit, npm audit). Report each vulnerability with its CVE ID, severity, affected package, and recommended fix version.",
+      "tools": ["Read", "Glob", "Grep", "Bash"],
+      "model": "sonnet"
+    },
+    "code-scanner": {
+      "description": "Static analysis for OWASP Top 10 vulnerabilities in source code",
+      "prompt": "Scan all source files for security vulnerabilities including SQL injection, XSS, command injection, path traversal, hardcoded secrets, insecure deserialization, and other OWASP Top 10 issues. For each finding, identify the exact file, line number, vulnerability type, and CWE ID. Provide a code-level remediation suggestion.",
+      "tools": ["Read", "Glob", "Grep"]
+    },
+    "config-scanner": {
+      "description": "Audits configuration files for security misconfigurations",
+      "prompt": "Check configuration files (.env, Dockerfile, docker-compose.yml, CI/CD configs, nginx.conf, etc.) for security misconfigurations: exposed secrets, overly permissive CORS, missing security headers, privileged containers, unencrypted connections, and weak TLS settings. Flag each issue with its risk level.",
+      "tools": ["Read", "Glob", "Grep"],
+      "model": "haiku"
+    }
+  },
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "risk_level": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low", "informational"],
+          "description": "Overall risk assessment for the codebase"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Executive summary of the security posture"
+        },
+        "vulnerabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low", "informational"]
+              },
+              "category": { "type": "string" },
+              "cwe": { "type": "string" },
+              "file": { "type": "string" },
+              "line": { "type": "integer" },
+              "description": { "type": "string" },
+              "remediation": { "type": "string" }
+            },
+            "required": ["title", "severity", "category", "description", "remediation"]
+          }
+        },
+        "stats": {
+          "type": "object",
+          "properties": {
+            "files_scanned": { "type": "integer" },
+            "total_vulnerabilities": { "type": "integer" },
+            "critical_count": { "type": "integer" },
+            "high_count": { "type": "integer" },
+            "medium_count": { "type": "integer" },
+            "low_count": { "type": "integer" }
+          },
+          "required": ["files_scanned", "total_vulnerabilities", "critical_count", "high_count", "medium_count", "low_count"]
+        }
+      },
+      "required": ["risk_level", "summary", "vulnerabilities", "stats"]
+    }
+  }
+}
