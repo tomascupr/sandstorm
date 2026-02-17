@@ -6,8 +6,8 @@ import logging
 import os
 import secrets
 import sys
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 
 import click
@@ -43,9 +43,7 @@ def _print_event(line: str) -> None:
             if block.get("type") == "text":
                 click.echo(block["text"], nl=False)
             elif block.get("type") == "tool_use":
-                click.echo(
-                    f"[tool: {block.get('name', 'unknown')}]", nl=False, err=True
-                )
+                click.echo(f"[tool: {block.get('name', 'unknown')}]", nl=False, err=True)
 
     elif event_type == "result":
         subtype = event.get("subtype", "unknown")
@@ -150,9 +148,9 @@ def query(
             key = str(rel_path)
             try:
                 files[key] = p.read_text()
-            except UnicodeDecodeError:
+            except UnicodeDecodeError as exc:
                 click.echo(f"Error: {key} is not a text file", err=True)
-                raise SystemExit(1)
+                raise SystemExit(1) from exc
 
     try:
         request = QueryRequest(
@@ -167,7 +165,7 @@ def query(
         )
     except Exception as exc:
         click.echo(f"Error: {exc}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
     async def _run() -> None:
         async for line in run_agent_in_sandbox(request, "cli"):
@@ -178,9 +176,9 @@ def query(
 
     try:
         asyncio.run(_run())
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as exc:
         click.echo("Interrupted.", err=True)
-        raise SystemExit(130)
+        raise SystemExit(130) from exc
 
 
 # ── Webhook management ─────────────────────────────────────────────────────
@@ -190,9 +188,7 @@ def _get_e2b_api_key(explicit: str | None) -> str:
     """Resolve E2B API key from flag, env, or .env file."""
     key = explicit or os.environ.get("E2B_API_KEY", "")
     if not key:
-        click.echo(
-            "Error: E2B API key required (--e2b-api-key or E2B_API_KEY)", err=True
-        )
+        click.echo("Error: E2B API key required (--e2b-api-key or E2B_API_KEY)", err=True)
         raise SystemExit(1)
     return key
 
@@ -212,10 +208,10 @@ def _webhook_request(
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         click.echo(f"Error: E2B API returned {exc.code}: {detail}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     except urllib.error.URLError as exc:
         click.echo(f"Error: Failed to reach E2B API: {exc.reason}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
 
 
 @cli.group()
@@ -232,9 +228,7 @@ def webhook() -> None:
 )
 @click.option("--e2b-api-key", default=None, help="E2B API key [env: E2B_API_KEY].")
 @click.option("--no-save", is_flag=True, help="Don't write secret to .env file.")
-def webhook_register(
-    url: str, secret: str | None, e2b_api_key: str | None, no_save: bool
-) -> None:
+def webhook_register(url: str, secret: str | None, e2b_api_key: str | None, no_save: bool) -> None:
     """Register an E2B lifecycle webhook.
 
     URL is the public endpoint (e.g. https://your-server.com/webhooks/e2b).
@@ -341,7 +335,7 @@ def webhook_test(url: str, secret: str | None) -> None:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         click.echo(f"✗ {exc.code}: {detail}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     except urllib.error.URLError as exc:
         click.echo(f"✗ Unreachable: {exc.reason}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

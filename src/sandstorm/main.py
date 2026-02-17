@@ -11,24 +11,22 @@ import uuid
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
+from e2b import AuthenticationException, SandboxException
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from e2b import AuthenticationException, SandboxException
-
-from . import _LOG_DATEFMT, _LOG_FORMAT
+from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
 from .models import QueryRequest
 from .sandbox import load_sandstorm_config, run_agent_in_sandbox
 from .telemetry import (
-    init as init_telemetry,
     get_tracer,
-    set_span_error,
+    record_error,
     record_request,
     record_request_duration,
-    record_error,
     record_webhook_event,
+    set_span_error,
 )
 
 load_dotenv()
@@ -87,9 +85,7 @@ def _auto_register_webhook() -> str | None:
     if not secret:
         secret = secrets.token_hex(32)
         _WEBHOOK_SECRET = secret
-        logger.info(
-            "Auto-generated webhook secret (set SANDSTORM_WEBHOOK_SECRET to persist)"
-        )
+        logger.info("Auto-generated webhook secret (set SANDSTORM_WEBHOOK_SECRET to persist)")
 
     payload: dict = {
         "name": "sandstorm-auto",
@@ -106,9 +102,7 @@ def _auto_register_webhook() -> str | None:
     try:
         result = _e2b_webhook_request("POST", "", api_key, payload)
         webhook_id = result.get("id") if isinstance(result, dict) else None
-        logger.info(
-            "Auto-registered E2B webhook: id=%s url=%s", webhook_id, webhook_url
-        )
+        logger.info("Auto-registered E2B webhook: id=%s url=%s", webhook_id, webhook_url)
         return webhook_id
     except Exception:
         logger.warning("Failed to auto-register E2B webhook", exc_info=True)
@@ -124,14 +118,12 @@ def _auto_deregister_webhook(webhook_id: str | None) -> None:
         _e2b_webhook_request("DELETE", f"/{webhook_id}", api_key)
         logger.info("Deregistered E2B webhook: id=%s", webhook_id)
     except Exception:
-        logger.warning(
-            "Failed to deregister E2B webhook id=%s", webhook_id, exc_info=True
-        )
+        logger.warning("Failed to deregister E2B webhook id=%s", webhook_id, exc_info=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_telemetry(app)
+    telemetry.init(app)
     if not _WEBHOOK_SECRET:
         logger.warning(
             "SANDSTORM_WEBHOOK_SECRET not set — webhook signature verification disabled"
@@ -141,7 +133,12 @@ async def lifespan(app: FastAPI):
     _auto_deregister_webhook(webhook_id)
 
 
-app = FastAPI(title="Sandstorm", lifespan=lifespan)
+app = FastAPI(
+    title="Sandstorm",
+    description="Run Claude Agent SDK in isolated E2B sandboxes. Stream results via SSE.",
+    version=__version__,
+    lifespan=lifespan,
+)
 
 cors_origins = [o.strip() for o in os.environ.get("CORS_ORIGINS", "*").split(",")]
 
@@ -154,12 +151,19 @@ app.add_middleware(
 )
 
 
-@app.get("/health")
+@app.get("/health", summary="Health check", description="Returns 200 if the server is running.")
 async def health():
     return {"status": "ok"}
 
 
-@app.post("/webhooks/e2b")
+@app.post(
+    "/webhooks/e2b",
+    summary="E2B webhook receiver",
+    description=(
+        "Receives E2B sandbox lifecycle events (created, updated, killed) for logging"
+        " and diagnostics. Verifies HMAC signature when SANDSTORM_WEBHOOK_SECRET is set."
+    ),
+)
 async def e2b_webhook(request: Request):
     """Receive E2B sandbox lifecycle events for logging and diagnostics."""
     body = await request.body()
@@ -170,9 +174,7 @@ async def e2b_webhook(request: Request):
             raw_signature = request.headers.get("e2b-signature", "")
             # Strip optional "sha256=" prefix (common webhook convention)
             signature = raw_signature.removeprefix("sha256=")
-            expected = hmac.new(
-                _WEBHOOK_SECRET.encode(), body, hashlib.sha256
-            ).hexdigest()
+            expected = hmac.new(_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
             if not hmac.compare_digest(signature, expected):
                 logger.warning("E2B webhook: invalid signature — rejecting")
                 sig_err = ValueError("invalid webhook signature")
@@ -207,7 +209,15 @@ async def e2b_webhook(request: Request):
         return {"status": "ok"}
 
 
-@app.post("/query")
+@app.post(
+    "/query",
+    summary="Run agent in sandbox",
+    description=(
+        "Execute a Claude Agent SDK query in an isolated E2B sandbox."
+        " Returns a Server-Sent Events stream of JSON messages"
+        " including system, assistant, result, and error events."
+    ),
+)
 async def query(request: QueryRequest):
     req_id = uuid.uuid4().hex[:8]
     logger.info(
@@ -237,9 +247,7 @@ async def query(request: QueryRequest):
                 record_request(model=request.model, status="error")
                 logger.error("[%s] Query failed: %s", req_id, e, exc_info=True)
                 yield {
-                    "data": json.dumps(
-                        {"type": "error", "error": str(e), "request_id": req_id}
-                    )
+                    "data": json.dumps({"type": "error", "error": str(e), "request_id": req_id})
                 }
             else:
                 record_request(model=request.model, status="ok")
