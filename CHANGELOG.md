@@ -2,6 +2,16 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.5.0] - 2026-02-17
+
+### Features
+
+- add optional OpenTelemetry integration (#22)
+
+### Other
+
+- Add examples directory with 4 real-world use cases (#23)
+
 ## [0.4.5] - 2026-02-15
 
 ### Bug Fixes
@@ -17,6 +27,10 @@ All notable changes to Sandstorm will be documented in this file.
 ### Features
 
 - add Claude Code Skills support for E2B sandbox (#20)
+
+### Miscellaneous
+
+- release v0.4.5 (#21)
 
 ### Refactoring
 
