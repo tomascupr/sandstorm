@@ -194,6 +194,7 @@ async def _create_sandbox(
                 api_key=api_key,
                 timeout=timeout,
                 envs=envs,
+                metadata={"request_id": request_id},
             )
         except NotFoundException:
             used_fallback = True
@@ -209,6 +210,7 @@ async def _create_sandbox(
                 api_key=api_key,
                 timeout=timeout,
                 envs=envs,
+                metadata={"request_id": request_id},
             )
             await sbx.commands.run(
                 "mkdir -p /opt/agent-runner"
@@ -254,14 +256,15 @@ async def _upload_files(
             )
             await sbx.commands.run(mkdir_cmd, timeout=10)
 
-        for path, content in files.items():
-            sandbox_path = f"/home/user/{path}"
-            try:
-                await sbx.files.write(sandbox_path, content)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to upload file {path!r} to sandbox: {exc}"
-                ) from exc
+        try:
+            await sbx.files.write_files([
+                {"path": f"/home/user/{path}", "data": content}
+                for path, content in files.items()
+            ])
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to upload files to sandbox: {exc}"
+            ) from exc
 
 
 def _load_skills_dir(skills_dir: str) -> dict[str, str]:
@@ -291,15 +294,20 @@ async def _upload_skills(
         attributes={"sandstorm.skill_count": len(skills)},
     ):
         logger.info("[%s] Uploading %d skills", request_id, len(skills))
-        for name, content in skills.items():
-            skill_dir = f"/home/user/.claude/skills/{name}"
-            await sbx.commands.run(f"mkdir -p {shlex.quote(skill_dir)}", timeout=5)
-            try:
-                await sbx.files.write(f"{skill_dir}/SKILL.md", content)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"Failed to upload skill {name!r} to sandbox: {exc}"
-                ) from exc
+        # Create all skill directories in a single command
+        dirs = [f"/home/user/.claude/skills/{name}" for name in skills]
+        mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in dirs)
+        await sbx.commands.run(mkdir_cmd, timeout=5)
+        # Batch write all skill files
+        try:
+            await sbx.files.write_files([
+                {"path": f"/home/user/.claude/skills/{name}/SKILL.md", "data": content}
+                for name, content in skills.items()
+            ])
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to upload skills to sandbox: {exc}"
+            ) from exc
 
 
 async def _cleanup(
@@ -399,42 +407,17 @@ async def run_agent_in_sandbox(
 
         has_skills = bool(merged_skills)
 
-        # Write Claude Agent SDK settings to the sandbox
+        # Build Claude Agent SDK settings
         settings: dict = {
             "permissions": {"allow": [], "deny": []},
         }
         if not has_skills:
             settings["env"] = {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}
-        await sbx.commands.run("mkdir -p /home/user/.claude", timeout=5)
-        await sbx.files.write(
-            "/home/user/.claude/settings.json",
-            json.dumps(settings, indent=2),
-        )
-
-        # Upload skills to the sandbox
-        if merged_skills:
-            await _upload_skills(sbx, merged_skills, request_id)
 
         # Auto-add "Skill" to allowed_tools if user set allowed_tools but forgot it
         allowed_tools = sandstorm_config.get("allowed_tools")
         if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
             allowed_tools = [*allowed_tools, "Skill"]
-
-        # Upload GCP credentials to the sandbox if Vertex AI is configured
-        if gcp_creds_content:
-            logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
-            await sbx.commands.run(
-                f"mkdir -p {posixpath.dirname(_GCP_CREDENTIALS_SANDBOX_PATH)}",
-                timeout=5,
-            )
-            await sbx.files.write(_GCP_CREDENTIALS_SANDBOX_PATH, gcp_creds_content)
-
-        # Upload user files (path traversal prevented by model validation)
-        if request.files:
-            await _upload_files(sbx, request.files, request_id)
-
-        # Upload runner script
-        await sbx.files.write("/opt/agent-runner/runner.mjs", _RUNNER_SCRIPT)
 
         # Build agent config: sandstorm.json (base) + request overrides
         agent_config = {
@@ -452,9 +435,34 @@ async def run_agent_in_sandbox(
             "has_skills": has_skills,
             "allowed_tools": allowed_tools,
         }
-        await sbx.files.write(
-            "/opt/agent-runner/agent_config.json", json.dumps(agent_config)
+
+        # Create all needed directories in a single command
+        dirs = ["/home/user/.claude"]
+        if gcp_creds_content:
+            dirs.append(posixpath.dirname(_GCP_CREDENTIALS_SANDBOX_PATH))
+        await sbx.commands.run(
+            " && ".join(f"mkdir -p {shlex.quote(d)}" for d in dirs),
+            timeout=5,
         )
+
+        # Upload skills (batch mkdir + batch write)
+        if merged_skills:
+            await _upload_skills(sbx, merged_skills, request_id)
+
+        # Upload user files (batch write)
+        if request.files:
+            await _upload_files(sbx, request.files, request_id)
+
+        # Batch-write all infrastructure files in a single API call
+        infra_files: list[dict[str, str]] = [
+            {"path": "/home/user/.claude/settings.json", "data": json.dumps(settings, indent=2)},
+            {"path": "/opt/agent-runner/runner.mjs", "data": _RUNNER_SCRIPT},
+            {"path": "/opt/agent-runner/agent_config.json", "data": json.dumps(agent_config)},
+        ]
+        if gcp_creds_content:
+            logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
+            infra_files.append({"path": _GCP_CREDENTIALS_SANDBOX_PATH, "data": gcp_creds_content})
+        await sbx.files.write_files(infra_files)
 
         # Run the SDK query() via the runner script
         logger.info(

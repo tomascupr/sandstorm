@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import json
 import logging
 import os
@@ -5,8 +7,9 @@ import time
 import uuid
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from e2b import AuthenticationException, SandboxException
@@ -46,9 +49,46 @@ app.add_middleware(
 
 init_telemetry(app)
 
+_WEBHOOK_SECRET = os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
+
 
 @app.get("/health")
 async def health():
+    return {"status": "ok"}
+
+
+@app.post("/webhooks/e2b")
+async def e2b_webhook(request: Request):
+    """Receive E2B sandbox lifecycle events for logging and diagnostics."""
+    body = await request.body()
+
+    # Verify HMAC signature when a secret is configured
+    if _WEBHOOK_SECRET:
+        signature = request.headers.get("e2b-signature", "")
+        expected = hmac.new(
+            _WEBHOOK_SECRET.encode(), body, hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(signature, expected):
+            logger.warning("E2B webhook: invalid signature — rejecting")
+            return JSONResponse({"error": "invalid signature"}, status_code=401)
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    event_type = payload.get("type", "unknown")
+    sandbox_id = payload.get("sandboxId", "unknown")
+    metadata = payload.get("eventData", {}).get("sandbox_metadata", {}) or {}
+    request_id = metadata.get("request_id", "unknown")
+
+    logger.info(
+        "[%s] E2B lifecycle event: %s sandbox=%s",
+        request_id,
+        event_type,
+        sandbox_id,
+    )
+
     return {"status": "ok"}
 
 
