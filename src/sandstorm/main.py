@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 import uuid
 
 from dotenv import load_dotenv
@@ -13,6 +14,14 @@ from e2b import AuthenticationException, SandboxException
 from . import _LOG_DATEFMT, _LOG_FORMAT
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
+from .telemetry import (
+    init as init_telemetry,
+    get_tracer,
+    set_span_error,
+    record_request,
+    record_request_duration,
+    record_error,
+)
 
 load_dotenv()
 
@@ -35,6 +44,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+init_telemetry(app)
+
 
 @app.get("/health")
 async def health():
@@ -52,17 +63,33 @@ async def query(request: QueryRequest):
     )
 
     async def event_generator():
-        try:
-            async for line in run_agent_in_sandbox(request, req_id):
-                yield {"data": line}
-        except (RuntimeError, SandboxException, AuthenticationException) as e:
-            logger.error("[%s] Query failed: %s", req_id, e, exc_info=True)
-            yield {
-                "data": json.dumps(
-                    {"type": "error", "error": str(e), "request_id": req_id}
-                )
-            }
-        else:
-            logger.info("[%s] Query completed", req_id)
+        start = time.monotonic()
+        with get_tracer().start_as_current_span(
+            "query",
+            attributes={
+                "sandstorm.request_id": req_id,
+                "sandstorm.model": request.model or "",
+                "sandstorm.timeout": request.timeout,
+                "sandstorm.file_count": len(request.files) if request.files else 0,
+            },
+        ) as span:
+            try:
+                async for line in run_agent_in_sandbox(request, req_id):
+                    yield {"data": line}
+            except (RuntimeError, SandboxException, AuthenticationException) as e:
+                set_span_error(span, e)
+                record_error(error_type=type(e).__name__)
+                record_request(model=request.model, status="error")
+                logger.error("[%s] Query failed: %s", req_id, e, exc_info=True)
+                yield {
+                    "data": json.dumps(
+                        {"type": "error", "error": str(e), "request_id": req_id}
+                    )
+                }
+            else:
+                record_request(model=request.model, status="ok")
+                logger.info("[%s] Query completed", req_id)
+            finally:
+                record_request_duration(time.monotonic() - start, model=request.model)
 
     return EventSourceResponse(event_generator(), ping=30)

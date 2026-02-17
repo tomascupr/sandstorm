@@ -5,6 +5,7 @@ import os
 import posixpath
 import re
 import shlex
+import time
 from collections.abc import AsyncGenerator
 from importlib.resources import files
 from pathlib import Path
@@ -12,6 +13,14 @@ from pathlib import Path
 from e2b import AsyncSandbox, NotFoundException
 
 from .models import QueryRequest
+from .telemetry import (
+    get_tracer,
+    record_sandbox_creation,
+    sandbox_started,
+    sandbox_stopped,
+    record_agent_execution,
+    record_queue_drop,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -173,64 +182,85 @@ async def _create_sandbox(
     request_id: str,
 ) -> AsyncSandbox:
     """Create sandbox, falling back to base template + runtime SDK install."""
-    logger.info("[%s] Creating sandbox template=%s", request_id, TEMPLATE)
-    try:
-        sbx = await AsyncSandbox.create(
-            template=TEMPLATE,
-            api_key=api_key,
-            timeout=timeout,
-            envs=envs,
+    with get_tracer().start_as_current_span(
+        "sandbox.create", attributes={"sandstorm.template": TEMPLATE}
+    ) as span:
+        start = time.monotonic()
+        logger.info("[%s] Creating sandbox template=%s", request_id, TEMPLATE)
+        used_fallback = False
+        try:
+            sbx = await AsyncSandbox.create(
+                template=TEMPLATE,
+                api_key=api_key,
+                timeout=timeout,
+                envs=envs,
+            )
+        except NotFoundException:
+            used_fallback = True
+            logger.warning(
+                "[%s] Template %r not found, falling back to %r (adds ~15s overhead)",
+                request_id,
+                TEMPLATE,
+                FALLBACK_TEMPLATE,
+            )
+            sbx = await AsyncSandbox.create(
+                template=FALLBACK_TEMPLATE,
+                api_key=api_key,
+                timeout=timeout,
+                envs=envs,
+            )
+            await sbx.commands.run(
+                "mkdir -p /opt/agent-runner"
+                " && cd /opt/agent-runner"
+                " && npm init -y"
+                f" && npm install @anthropic-ai/claude-agent-sdk@{SDK_VERSION}",
+                timeout=_SDK_INSTALL_TIMEOUT,
+            )
+        duration = time.monotonic() - start
+        span.set_attribute("sandstorm.template_fallback", used_fallback)
+        span.set_attribute("sandstorm.sandbox_id", sbx.sandbox_id)
+        record_sandbox_creation(
+            duration, template=FALLBACK_TEMPLATE if used_fallback else TEMPLATE
         )
-    except NotFoundException:
-        logger.warning(
-            "[%s] Template %r not found, falling back to %r (adds ~15s overhead)",
-            request_id,
-            TEMPLATE,
-            FALLBACK_TEMPLATE,
-        )
-        sbx = await AsyncSandbox.create(
-            template=FALLBACK_TEMPLATE,
-            api_key=api_key,
-            timeout=timeout,
-            envs=envs,
-        )
-        await sbx.commands.run(
-            "mkdir -p /opt/agent-runner"
-            " && cd /opt/agent-runner"
-            " && npm init -y"
-            f" && npm install @anthropic-ai/claude-agent-sdk@{SDK_VERSION}",
-            timeout=_SDK_INSTALL_TIMEOUT,
-        )
-    logger.info("[%s] Sandbox created: %s", request_id, sbx.sandbox_id)
-    return sbx
+        sandbox_started()
+        logger.info("[%s] Sandbox created: %s", request_id, sbx.sandbox_id)
+        return sbx
 
 
 async def _upload_files(
     sbx: AsyncSandbox, files: dict[str, str], request_id: str
 ) -> None:
     """Upload user files to the sandbox, creating parent directories as needed."""
-    logger.info("[%s] Uploading %d files", request_id, len(files))
-    # Collect parent dirs that need creation (deduplicate, skip top-level files)
-    dirs_to_create: set[str] = set()
-    for path in files:
-        parent = posixpath.dirname(path)
-        if parent:  # non-empty means nested path like "src/main.py"
-            dirs_to_create.add(f"/home/user/{parent}")
+    total_size = sum(len(c.encode()) for c in files.values())
+    with get_tracer().start_as_current_span(
+        "sandbox.upload_files",
+        attributes={
+            "sandstorm.file_count": len(files),
+            "sandstorm.total_size_bytes": total_size,
+        },
+    ):
+        logger.info("[%s] Uploading %d files", request_id, len(files))
+        # Collect parent dirs that need creation (deduplicate, skip top-level files)
+        dirs_to_create: set[str] = set()
+        for path in files:
+            parent = posixpath.dirname(path)
+            if parent:  # non-empty means nested path like "src/main.py"
+                dirs_to_create.add(f"/home/user/{parent}")
 
-    if dirs_to_create:
-        mkdir_cmd = " && ".join(
-            f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
-        )
-        await sbx.commands.run(mkdir_cmd, timeout=10)
+        if dirs_to_create:
+            mkdir_cmd = " && ".join(
+                f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create)
+            )
+            await sbx.commands.run(mkdir_cmd, timeout=10)
 
-    for path, content in files.items():
-        sandbox_path = f"/home/user/{path}"
-        try:
-            await sbx.files.write(sandbox_path, content)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to upload file {path!r} to sandbox: {exc}"
-            ) from exc
+        for path, content in files.items():
+            sandbox_path = f"/home/user/{path}"
+            try:
+                await sbx.files.write(sandbox_path, content)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to upload file {path!r} to sandbox: {exc}"
+                ) from exc
 
 
 def _load_skills_dir(skills_dir: str) -> dict[str, str]:
@@ -255,41 +285,49 @@ async def _upload_skills(
     sbx: AsyncSandbox, skills: dict[str, str], request_id: str
 ) -> None:
     """Upload skills to /home/user/.claude/skills/<name>/SKILL.md in the sandbox."""
-    logger.info("[%s] Uploading %d skills", request_id, len(skills))
-    for name, content in skills.items():
-        skill_dir = f"/home/user/.claude/skills/{name}"
-        await sbx.commands.run(f"mkdir -p {shlex.quote(skill_dir)}", timeout=5)
-        try:
-            await sbx.files.write(f"{skill_dir}/SKILL.md", content)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to upload skill {name!r} to sandbox: {exc}"
-            ) from exc
+    with get_tracer().start_as_current_span(
+        "sandbox.upload_skills",
+        attributes={"sandstorm.skill_count": len(skills)},
+    ):
+        logger.info("[%s] Uploading %d skills", request_id, len(skills))
+        for name, content in skills.items():
+            skill_dir = f"/home/user/.claude/skills/{name}"
+            await sbx.commands.run(f"mkdir -p {shlex.quote(skill_dir)}", timeout=5)
+            try:
+                await sbx.files.write(f"{skill_dir}/SKILL.md", content)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to upload skill {name!r} to sandbox: {exc}"
+                ) from exc
 
 
 async def _cleanup(
     task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str
 ) -> None:
     """Cancel the background command task and destroy the sandbox."""
-    # task may be None if an error occurred before create_task()
-    if task is not None and not task.done():
-        task.cancel()
-        try:
-            await task
-        except (asyncio.CancelledError, Exception):
-            pass
-    elif task is not None:
-        # Task finished — suppress any command exit exception
-        try:
-            task.result()
-        except Exception:
-            logger.warning(
-                "[%s] Task exception suppressed (runner likely streamed the error)",
-                request_id,
-                exc_info=True,
-            )
-    logger.info("[%s] Destroying sandbox %s", request_id, sbx.sandbox_id)
-    await sbx.kill()
+    with get_tracer().start_as_current_span(
+        "sandbox.cleanup",
+        attributes={"sandstorm.sandbox_id": sbx.sandbox_id},
+    ):
+        # task may be None if an error occurred before create_task()
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
+        elif task is not None:
+            # Task finished — suppress any command exit exception
+            try:
+                task.result()
+            except Exception:
+                logger.warning(
+                    "[%s] Task exception suppressed (runner likely streamed the error)",
+                    request_id,
+                    exc_info=True,
+                )
+        logger.info("[%s] Destroying sandbox %s", request_id, sbx.sandbox_id)
+        await sbx.kill()
 
 
 def _to_str(data) -> str:
@@ -310,6 +348,7 @@ async def run_agent_in_sandbox(
         try:
             queue.put_nowait(data)
         except asyncio.QueueFull:
+            record_queue_drop()
             if not _queue_full_warned:
                 logger.warning(
                     "[%s] Queue full (maxsize=%d), dropping messages — consumer can't keep up",
@@ -443,16 +482,31 @@ async def run_agent_in_sandbox(
             finally:
                 await queue.put(None)
 
-        task = asyncio.create_task(run_command())
+        agent_start = time.monotonic()
+        with get_tracer().start_as_current_span(
+            "agent.execute",
+            attributes={
+                "sandstorm.model": agent_config.get("model") or "",
+                "sandstorm.sandbox_id": sbx.sandbox_id,
+                "sandstorm.has_skills": has_skills,
+            },
+        ):
+            task = asyncio.create_task(run_command())
 
-        # Yield messages from queue until the process ends
-        while True:
-            line = await queue.get()
-            if line is None:
-                break
-            line = line.strip()
-            if line:
-                yield line
+            # Yield messages from queue until the process ends
+            while True:
+                line = await queue.get()
+                if line is None:
+                    break
+                line = line.strip()
+                if line:
+                    yield line
+
+            record_agent_execution(
+                time.monotonic() - agent_start,
+                model=agent_config.get("model"),
+            )
 
     finally:
+        sandbox_stopped()
         await _cleanup(task, sbx, request_id)
