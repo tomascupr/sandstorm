@@ -132,6 +132,10 @@ def _auto_deregister_webhook(webhook_id: str | None) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_telemetry(app)
+    if not _WEBHOOK_SECRET:
+        logger.warning(
+            "SANDSTORM_WEBHOOK_SECRET not set — webhook signature verification disabled"
+        )
     webhook_id = _auto_register_webhook()
     yield
     _auto_deregister_webhook(webhook_id)

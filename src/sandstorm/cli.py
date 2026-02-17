@@ -250,6 +250,7 @@ def webhook_register(
     if not secret:
         secret = secrets.token_hex(32)
         click.echo(f"Generated webhook secret: {secret}", err=True)
+        click.echo("Save this secret securely — it won't be shown again", err=True)
 
     payload: dict = {
         "name": "sandstorm",
