@@ -64,10 +64,10 @@ async def e2b_webhook(request: Request):
 
     # Verify HMAC signature when a secret is configured
     if _WEBHOOK_SECRET:
-        signature = request.headers.get("e2b-signature", "")
-        expected = hmac.new(
-            _WEBHOOK_SECRET.encode(), body, hashlib.sha256
-        ).hexdigest()
+        raw_signature = request.headers.get("e2b-signature", "")
+        # Strip optional "sha256=" prefix (common webhook convention)
+        signature = raw_signature.removeprefix("sha256=")
+        expected = hmac.new(_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(signature, expected):
             logger.warning("E2B webhook: invalid signature — rejecting")
             return JSONResponse({"error": "invalid signature"}, status_code=401)

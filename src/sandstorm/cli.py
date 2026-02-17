@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import secrets
 import sys
 import urllib.request
 import urllib.error
@@ -189,24 +190,31 @@ def _get_e2b_api_key(explicit: str | None) -> str:
     """Resolve E2B API key from flag, env, or .env file."""
     key = explicit or os.environ.get("E2B_API_KEY", "")
     if not key:
-        click.echo("Error: E2B API key required (--e2b-api-key or E2B_API_KEY)", err=True)
+        click.echo(
+            "Error: E2B API key required (--e2b-api-key or E2B_API_KEY)", err=True
+        )
         raise SystemExit(1)
     return key
 
 
-def _webhook_request(method: str, path: str, api_key: str, data: dict | None = None) -> dict | list | None:
+def _webhook_request(
+    method: str, path: str, api_key: str, data: dict | None = None
+) -> dict | list | None:
     """Make a request to the E2B webhook API."""
     url = f"{_E2B_WEBHOOK_API}{path}"
     headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
     body = json.dumps(data).encode() if data else None
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             raw = resp.read()
             return json.loads(raw) if raw else None
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode(errors="replace")
         click.echo(f"Error: E2B API returned {exc.code}: {detail}", err=True)
+        raise SystemExit(1)
+    except urllib.error.URLError as exc:
+        click.echo(f"Error: Failed to reach E2B API: {exc.reason}", err=True)
         raise SystemExit(1)
 
 
@@ -217,7 +225,11 @@ def webhook() -> None:
 
 @webhook.command("register")
 @click.argument("url")
-@click.option("--secret", default=None, help="Webhook signature secret [env: SANDSTORM_WEBHOOK_SECRET].")
+@click.option(
+    "--secret",
+    default=None,
+    help="Webhook signature secret [env: SANDSTORM_WEBHOOK_SECRET].",
+)
 @click.option("--e2b-api-key", default=None, help="E2B API key [env: E2B_API_KEY].")
 def webhook_register(url: str, secret: str | None, e2b_api_key: str | None) -> None:
     """Register an E2B lifecycle webhook.
@@ -227,19 +239,24 @@ def webhook_register(url: str, secret: str | None, e2b_api_key: str | None) -> N
     load_dotenv()
     api_key = _get_e2b_api_key(e2b_api_key)
     secret = secret or os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
+    if not secret:
+        secret = secrets.token_hex(32)
+        click.echo(f"Generated webhook secret: {secret}", err=True)
+        click.echo(
+            "Set SANDSTORM_WEBHOOK_SECRET to this value on your server.", err=True
+        )
 
     payload: dict = {
         "name": "sandstorm",
         "url": url,
         "enabled": True,
+        "signatureSecret": secret,
         "events": [
             "sandbox.lifecycle.created",
             "sandbox.lifecycle.updated",
             "sandbox.lifecycle.killed",
         ],
     }
-    if secret:
-        payload["signatureSecret"] = secret
 
     result = _webhook_request("POST", "", api_key, payload)
     click.echo(f"Webhook registered: {json.dumps(result, indent=2)}")

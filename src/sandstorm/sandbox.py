@@ -257,14 +257,14 @@ async def _upload_files(
             await sbx.commands.run(mkdir_cmd, timeout=10)
 
         try:
-            await sbx.files.write_files([
-                {"path": f"/home/user/{path}", "data": content}
-                for path, content in files.items()
-            ])
+            await sbx.files.write_files(
+                [
+                    {"path": f"/home/user/{path}", "data": content}
+                    for path, content in files.items()
+                ]
+            )
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to upload files to sandbox: {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to upload files to sandbox: {exc}") from exc
 
 
 def _load_skills_dir(skills_dir: str) -> dict[str, str]:
@@ -300,14 +300,17 @@ async def _upload_skills(
         await sbx.commands.run(mkdir_cmd, timeout=5)
         # Batch write all skill files
         try:
-            await sbx.files.write_files([
-                {"path": f"/home/user/.claude/skills/{name}/SKILL.md", "data": content}
-                for name, content in skills.items()
-            ])
+            await sbx.files.write_files(
+                [
+                    {
+                        "path": f"/home/user/.claude/skills/{name}/SKILL.md",
+                        "data": content,
+                    }
+                    for name, content in skills.items()
+                ]
+            )
         except Exception as exc:
-            raise RuntimeError(
-                f"Failed to upload skills to sandbox: {exc}"
-            ) from exc
+            raise RuntimeError(f"Failed to upload skills to sandbox: {exc}") from exc
 
 
 async def _cleanup(
@@ -454,15 +457,26 @@ async def run_agent_in_sandbox(
             await _upload_files(sbx, request.files, request_id)
 
         # Batch-write all infrastructure files in a single API call
-        infra_files: list[dict[str, str]] = [
-            {"path": "/home/user/.claude/settings.json", "data": json.dumps(settings, indent=2)},
-            {"path": "/opt/agent-runner/runner.mjs", "data": _RUNNER_SCRIPT},
-            {"path": "/opt/agent-runner/agent_config.json", "data": json.dumps(agent_config)},
-        ]
         if gcp_creds_content:
             logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
-            infra_files.append({"path": _GCP_CREDENTIALS_SANDBOX_PATH, "data": gcp_creds_content})
-        await sbx.files.write_files(infra_files)
+        await sbx.files.write_files(
+            [
+                {
+                    "path": "/home/user/.claude/settings.json",
+                    "data": json.dumps(settings, indent=2),
+                },
+                {"path": "/opt/agent-runner/runner.mjs", "data": _RUNNER_SCRIPT},
+                {
+                    "path": "/opt/agent-runner/agent_config.json",
+                    "data": json.dumps(agent_config),
+                },
+                *(
+                    [{"path": _GCP_CREDENTIALS_SANDBOX_PATH, "data": gcp_creds_content}]
+                    if gcp_creds_content
+                    else []
+                ),
+            ]
+        )
 
         # Run the SDK query() via the runner script
         logger.info(
