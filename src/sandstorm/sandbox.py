@@ -197,6 +197,7 @@ async def _create_sandbox(
             )
         except NotFoundException:
             used_fallback = True
+            span.set_attribute("sandstorm.template_fallback", True)
             logger.warning(
                 "[%s] Template %r not found, falling back to %r (adds ~15s overhead)",
                 request_id,
