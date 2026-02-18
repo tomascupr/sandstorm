@@ -113,6 +113,8 @@ class RunStore:
                     try:
                         data = json.loads(line)
                         run = Run(**data)
+                        if run.id in self._index:
+                            continue
                         self._runs.append(run)
                         self._index[run.id] = run
                     except (json.JSONDecodeError, TypeError, KeyError):
