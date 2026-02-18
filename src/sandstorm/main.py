@@ -272,7 +272,8 @@ async def query(request: QueryRequest):
                     try:
                         parsed = json.loads(line)
                         if parsed.get("type") == "result":
-                            cost_usd = parsed.get("total_cost_usd") or parsed.get("cost_usd")
+                            cost = parsed.get("total_cost_usd")
+                            cost_usd = cost if cost is not None else parsed.get("cost_usd")
                             num_turns = parsed.get("num_turns")
                         elif parsed.get("type") == "system" and parsed.get("subtype") == "init":
                             model = parsed.get("model") or model
