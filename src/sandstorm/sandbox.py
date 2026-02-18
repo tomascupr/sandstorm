@@ -89,6 +89,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "skills_dir": ((str,), "str"),
         "allowed_tools": ((list,), "list"),
         "webhook_url": ((str,), "str"),
+        "template_skills": ((bool,), "bool"),
     }
 
     validated: dict = {}
@@ -265,10 +266,14 @@ async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: st
             ) from exc
 
 
-def _load_skills_dir(skills_dir: str) -> dict[str, str]:
-    """Read SKILL.md files from a host directory into {name: content} dict."""
+def _load_skills_dir(skills_dir: str) -> dict[str, dict[str, str]]:
+    """Read all files from each skill subdirectory into {name: {relative_path: content}}.
+
+    Each subdirectory must contain a SKILL.md to be recognized as a valid skill.
+    .DS_Store files are skipped.
+    """
     base = Path.cwd() / skills_dir
-    skills: dict[str, str] = {}
+    skills: dict[str, dict[str, str]] = {}
     if not base.is_dir():
         return skills
     for entry in base.iterdir():
@@ -278,33 +283,51 @@ def _load_skills_dir(skills_dir: str) -> dict[str, str]:
             logger.warning("skills_dir: skipping %r (invalid name)", entry.name)
             continue
         skill_file = entry / "SKILL.md"
-        if skill_file.is_file():
-            skills[entry.name] = skill_file.read_text()
+        if not skill_file.is_file():
+            continue
+        skill_files: dict[str, str] = {}
+        for file_path in entry.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if file_path.name == ".DS_Store":
+                continue
+            relative = file_path.relative_to(entry)
+            skill_files[str(relative)] = file_path.read_text()
+        skills[entry.name] = skill_files
     return skills
 
 
-async def _upload_skills(sbx: AsyncSandbox, skills: dict[str, str], request_id: str) -> None:
-    """Upload skills to /home/user/.claude/skills/<name>/SKILL.md in the sandbox."""
+async def _upload_skills(
+    sbx: AsyncSandbox, skills: dict[str, dict[str, str]], request_id: str
+) -> None:
+    """Upload all skill files to /home/user/.claude/skills/<name>/ in the sandbox."""
     with get_tracer().start_as_current_span(
         "sandbox.upload_skills",
         attributes={"sandstorm.skill_count": len(skills)},
     ):
         logger.info("[%s] Uploading %d skills", request_id, len(skills))
-        # Create all skill directories in a single command
-        dirs = [f"/home/user/.claude/skills/{name}" for name in skills]
-        mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in dirs)
-        await sbx.commands.run(mkdir_cmd, timeout=5)
+        # Collect all directories that need creation (skill roots + subdirs)
+        dirs: set[str] = set()
+        for name, skill_files in skills.items():
+            dirs.add(f"/home/user/.claude/skills/{name}")
+            for rel_path in skill_files:
+                parent = posixpath.dirname(rel_path)
+                if parent:
+                    dirs.add(f"/home/user/.claude/skills/{name}/{parent}")
+        mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs))
+        await sbx.commands.run(mkdir_cmd, timeout=10)
         # Batch write all skill files
-        try:
-            await sbx.files.write_files(
-                [
+        write_list = []
+        for name, skill_files in skills.items():
+            for rel_path, content in skill_files.items():
+                write_list.append(
                     {
-                        "path": f"/home/user/.claude/skills/{name}/SKILL.md",
+                        "path": f"/home/user/.claude/skills/{name}/{rel_path}",
                         "data": content,
                     }
-                    for name, content in skills.items()
-                ]
-            )
+                )
+        try:
+            await sbx.files.write_files(write_list)
         except Exception as exc:
             names = ", ".join(skills.keys())
             raise RuntimeError(
@@ -405,7 +428,7 @@ async def run_agent_in_sandbox(
     task = None
     try:
         # Load skills from skills_dir
-        merged_skills: dict[str, str] = {}
+        merged_skills: dict[str, dict[str, str]] = {}
         if sandstorm_config.get("skills_dir"):
             merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
 
@@ -449,8 +472,8 @@ async def run_agent_in_sandbox(
             timeout=5,
         )
 
-        # Upload skills (batch mkdir + batch write)
-        if merged_skills:
+        # Upload skills (batch mkdir + batch write) — skip if baked into template
+        if merged_skills and not sandstorm_config.get("template_skills"):
             await _upload_skills(sbx, merged_skills, request_id)
 
         # Upload user files (batch write)

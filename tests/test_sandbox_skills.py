@@ -26,6 +26,22 @@ class TestValidateSandstormConfigSkills:
         config = _validate_sandstorm_config({"skills_dir": "/nonexistent/path/to/skills"})
         assert "skills_dir" not in config
 
+    def test_template_skills_valid(self):
+        config = _validate_sandstorm_config({"template_skills": True})
+        assert config["template_skills"] is True
+
+    def test_template_skills_false_valid(self):
+        config = _validate_sandstorm_config({"template_skills": False})
+        assert config["template_skills"] is False
+
+    def test_template_skills_wrong_type_dropped(self):
+        config = _validate_sandstorm_config({"template_skills": "yes"})
+        assert "template_skills" not in config
+
+    def test_template_skills_int_dropped(self):
+        config = _validate_sandstorm_config({"template_skills": 1})
+        assert "template_skills" not in config
+
 
 class TestLoadSkillsDir:
     def test_loads_skill_md_from_subdirs(self, tmp_path, monkeypatch):
@@ -36,7 +52,38 @@ class TestLoadSkillsDir:
         (skill_a / "SKILL.md").write_text("Skill A content")
 
         result = _load_skills_dir("skills")
-        assert result == {"skill-a": "Skill A content"}
+        assert result == {"skill-a": {"SKILL.md": "Skill A content"}}
+
+    def test_loads_all_files_in_skill(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        skills_dir = tmp_path / "skills"
+        skill = skills_dir / "pdf"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("PDF skill")
+        (skill / "reference.md").write_text("Reference docs")
+        scripts = skill / "scripts"
+        scripts.mkdir()
+        (scripts / "convert.py").write_text("print('convert')")
+
+        result = _load_skills_dir("skills")
+        assert result == {
+            "pdf": {
+                "SKILL.md": "PDF skill",
+                "reference.md": "Reference docs",
+                "scripts/convert.py": "print('convert')",
+            }
+        }
+
+    def test_skips_ds_store(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        skills_dir = tmp_path / "skills"
+        skill = skills_dir / "test-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("content")
+        (skill / ".DS_Store").write_text("junk")
+
+        result = _load_skills_dir("skills")
+        assert result == {"test-skill": {"SKILL.md": "content"}}
 
     def test_ignores_non_directories(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -69,7 +116,7 @@ class TestLoadSkillsDir:
             (bad / "SKILL.md").write_text("should be skipped")
 
         result = _load_skills_dir("skills")
-        assert result == {"good-skill": "valid"}
+        assert result == {"good-skill": {"SKILL.md": "valid"}}
 
     def test_nonexistent_dir_returns_empty(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -85,4 +132,7 @@ class TestLoadSkillsDir:
             (d / "SKILL.md").write_text(f"{name} content")
 
         result = _load_skills_dir("skills")
-        assert result == {"alpha": "alpha content", "beta": "beta content"}
+        assert result == {
+            "alpha": {"SKILL.md": "alpha content"},
+            "beta": {"SKILL.md": "beta content"},
+        }

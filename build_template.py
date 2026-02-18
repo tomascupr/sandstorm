@@ -33,6 +33,11 @@ template = (
         " && chmod -R 777 /opt/agent-runner",
         user="root",
     )
+    # Bake document skills (pdf, docx, pptx) into the template
+    .copy(
+        ".claude/skills",
+        "/home/user/.claude/skills",
+    )
 )
 
 

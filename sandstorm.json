@@ -1,6 +1,8 @@
 {
   "system_prompt": "You are a helpful coding assistant. Be concise.",
   "model": "sonnet",
+  "skills_dir": ".claude/skills",
+  "template_skills": true,
   "output_format": {
     "type": "json_schema",
     "schema": {
