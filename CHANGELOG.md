@@ -2,11 +2,24 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.6.0] - 2026-02-18
+
+### Features
+
+- add /runs endpoint and web dashboard (#28)
+- bake document skills (pdf, docx, pptx) into E2B template (#29)
+- DX improvements for API docs, config, and error handling (#26)
+- batch sandbox writes, metadata, and webhook support (#25)
+
 ## [0.5.0] - 2026-02-17
 
 ### Features
 
 - add optional OpenTelemetry integration (#22)
+
+### Miscellaneous
+
+- release v0.5.0 (#24)
 
 ### Other
 
