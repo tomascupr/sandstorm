@@ -358,7 +358,43 @@ Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Micros
 | **Azure** | `CLAUDE_CODE_USE_FOUNDRY=1`, `AZURE_FOUNDRY_RESOURCE`, `AZURE_API_KEY` |
 | **Custom proxy** | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (optional) |
 
+## Dashboard
+
+Start the server and open `http://localhost:8000/` to see a live dashboard of all agent runs:
+
+```bash
+ds serve
+open http://localhost:8000
+```
+
+The dashboard auto-refreshes every 3 seconds, showing status, model, cost, turns, and duration for each run. Run history is persisted to `.sandstorm/runs.jsonl` and survives server restarts.
+
+The `GET /runs` endpoint returns the same data as JSON for programmatic access.
+
+> **Note:** On Vercel, run history is limited to the current function invocation (ephemeral filesystem). For persistent history, use a long-running server.
+
 ## API Reference
+
+### `GET /runs`
+
+Returns recent agent runs as a JSON array, newest first.
+
+```json
+[
+  {
+    "id": "a1b2c3d4",
+    "prompt": "Create hello.py and run it",
+    "model": "claude-sonnet-4-5-20250929",
+    "status": "completed",
+    "cost_usd": 0.069,
+    "num_turns": 6,
+    "duration_secs": 28.5,
+    "started_at": "2025-02-18T22:10:30Z",
+    "error": null,
+    "files_count": 0
+  }
+]
+```
 
 ### `POST /query`
 
