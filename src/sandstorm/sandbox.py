@@ -432,7 +432,7 @@ async def run_agent_in_sandbox(
         if sandstorm_config.get("skills_dir"):
             merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
 
-        has_skills = bool(merged_skills)
+        has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
 
         # Build Claude Agent SDK settings
         settings: dict = {
