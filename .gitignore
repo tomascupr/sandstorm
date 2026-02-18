@@ -13,3 +13,6 @@ CLAUDE.md
 # GCP service account keys
 gcp-*.json
 .DS_Store
+
+# Run history
+.sandstorm/

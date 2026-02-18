@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sandstorm Dashboard</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+    background: #0d1117;
+    color: #c9d1d9;
+    padding: 24px;
+    min-height: 100vh;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    color: #e6edf3;
+  }
+  .stats {
+    display: flex;
+    gap: 16px;
+    font-size: 13px;
+    color: #8b949e;
+  }
+  .stats span { white-space: nowrap; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  thead th {
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid #21262d;
+    color: #8b949e;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  tbody td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #161b22;
+    vertical-align: top;
+  }
+  tbody tr:hover { background: #161b22; }
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .status-running { background: #d29922; }
+  .status-completed { background: #3fb950; }
+  .status-error { background: #f85149; }
+  .prompt-cell {
+    max-width: 320px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .run-id {
+    font-family: monospace;
+    color: #8b949e;
+  }
+  .cost { color: #3fb950; }
+  .error-text { color: #f85149; font-size: 12px; }
+  .time-cell { white-space: nowrap; color: #8b949e; }
+  .empty-state {
+    text-align: center;
+    padding: 64px 24px;
+    color: #484f58;
+    font-size: 15px;
+  }
+  @media (max-width: 768px) {
+    body { padding: 12px; }
+    table { font-size: 12px; }
+    thead th, tbody td { padding: 6px 8px; }
+    .prompt-cell { max-width: 160px; }
+    .hide-mobile { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sandstorm Runs</h1>
+  <div class="stats" id="stats"></div>
+</header>
+<div id="content">
+  <div class="empty-state">Loading...</div>
+</div>
+<script>
+async function fetchRuns() {
+  try {
+    const res = await fetch('/runs');
+    if (!res.ok) return;
+    const runs = await res.json();
+    render(runs);
+  } catch (e) {
+    // Silently retry on next interval
+  }
+}
+
+function render(runs) {
+  const content = document.getElementById('content');
+  const stats = document.getElementById('stats');
+
+  if (!runs.length) {
+    content.innerHTML = '<div class="empty-state">No runs yet. Send a POST to /query to get started.</div>';
+    stats.innerHTML = '';
+    return;
+  }
+
+  const total = runs.length;
+  const running = runs.filter(r => r.status === 'running').length;
+  const completed = runs.filter(r => r.status === 'completed').length;
+  const errors = runs.filter(r => r.status === 'error').length;
+  const totalCost = runs.reduce((s, r) => s + (r.cost_usd || 0), 0);
+
+  stats.innerHTML = `
+    <span>${total} total</span>
+    <span>${running} running</span>
+    <span>${completed} completed</span>
+    <span>${errors} errors</span>
+    <span>$${totalCost.toFixed(4)} total cost</span>
+  `;
+
+  let html = `<table>
+    <thead><tr>
+      <th>Status</th>
+      <th>Run ID</th>
+      <th>Prompt</th>
+      <th>Model</th>
+      <th class="hide-mobile">Turns</th>
+      <th>Cost</th>
+      <th>Duration</th>
+      <th class="hide-mobile">Time</th>
+    </tr></thead><tbody>`;
+
+  for (const run of runs) {
+    const dotClass = 'status-' + run.status;
+    const duration = run.duration_secs != null ? run.duration_secs.toFixed(1) + 's' : '-';
+    const cost = run.cost_usd != null ? '$' + run.cost_usd.toFixed(4) : '-';
+    const turns = run.num_turns != null ? run.num_turns : '-';
+    const time = formatTime(run.started_at);
+    const model = run.model || '-';
+
+    html += `<tr>
+      <td><span class="status-dot ${dotClass}"></span>${run.status}</td>
+      <td class="run-id">${esc(run.id)}</td>
+      <td class="prompt-cell" title="${esc(run.prompt)}">${esc(run.prompt)}</td>
+      <td>${esc(model)}</td>
+      <td class="hide-mobile">${turns}</td>
+      <td class="cost">${cost}</td>
+      <td>${duration}</td>
+      <td class="time-cell hide-mobile">${time}</td>
+    </tr>`;
+    if (run.error) {
+      html += `<tr><td></td><td colspan="7" class="error-text">${esc(run.error)}</td></tr>`;
+    }
+  }
+
+  html += '</tbody></table>';
+  content.innerHTML = html;
+}
+
+function formatTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function esc(s) {
+  if (!s) return '';
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+
+fetchRuns();
+setInterval(fetchRuns, 3000);
+</script>
+</body>
+</html>

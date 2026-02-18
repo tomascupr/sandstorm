@@ -9,17 +9,19 @@ import urllib.error
 import urllib.request
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from dotenv import load_dotenv
 from e2b import AuthenticationException, SandboxException
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
 from .models import QueryRequest
 from .sandbox import load_sandstorm_config, run_agent_in_sandbox
+from .store import run_store
 from .telemetry import (
     get_tracer,
     record_error,
@@ -151,6 +153,23 @@ app.add_middleware(
 )
 
 
+_DASHBOARD_HTML = (Path(__file__).parent / "dashboard.html").read_text()
+
+
+@app.get("/", summary="Dashboard", description="Runs dashboard UI.", response_class=HTMLResponse)
+async def dashboard():
+    return HTMLResponse(_DASHBOARD_HTML)
+
+
+@app.get(
+    "/runs",
+    summary="List runs",
+    description="Returns recent agent runs, newest first.",
+)
+async def list_runs():
+    return run_store.list()
+
+
 @app.get("/health", summary="Health check", description="Returns 200 if the server is running.")
 async def health():
     return {"status": "ok"}
@@ -229,6 +248,15 @@ async def query(request: QueryRequest):
 
     async def event_generator():
         start = time.monotonic()
+        run_store.create(
+            id=req_id,
+            prompt=request.prompt,
+            model=request.model,
+            files_count=len(request.files) if request.files else 0,
+        )
+        cost_usd = None
+        num_turns = None
+        model = request.model
         with get_tracer().start_as_current_span(
             "query",
             attributes={
@@ -240,18 +268,32 @@ async def query(request: QueryRequest):
         ) as span:
             try:
                 async for line in run_agent_in_sandbox(request, req_id):
+                    # Extract metadata from streamed messages
+                    try:
+                        parsed = json.loads(line)
+                        if parsed.get("type") == "result":
+                            cost_usd = parsed.get("total_cost_usd") or parsed.get("cost_usd")
+                            num_turns = parsed.get("num_turns")
+                        elif parsed.get("type") == "system" and parsed.get("subtype") == "init":
+                            model = parsed.get("model") or model
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                     yield {"data": line}
             except (RuntimeError, SandboxException, AuthenticationException) as e:
                 set_span_error(span, e)
                 record_error(error_type=type(e).__name__)
                 record_request(model=request.model, status="error")
                 logger.error("[%s] Query failed: %s", req_id, e, exc_info=True)
+                duration = time.monotonic() - start
+                run_store.fail(req_id, str(e), duration)
                 yield {
                     "data": json.dumps({"type": "error", "error": str(e), "request_id": req_id})
                 }
             else:
                 record_request(model=request.model, status="ok")
                 logger.info("[%s] Query completed", req_id)
+                duration = time.monotonic() - start
+                run_store.complete(req_id, cost_usd, num_turns, duration, model)
             finally:
                 record_request_duration(time.monotonic() - start, model=request.model)
 
