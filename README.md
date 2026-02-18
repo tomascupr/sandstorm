@@ -23,6 +23,7 @@ Most companies want to use AI agents but hit the same wall: infrastructure, secu
 
 - **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
+- **Document skills built-in** -- PDF, DOCX, and PPTX processing pre-installed in every sandbox
 - **Safe by design** -- every request gets a fresh VM that's destroyed after, with zero state leakage
 - **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
@@ -64,7 +65,7 @@ uv sync
 
 ### E2B Sandbox Template
 
-Sandstorm ships with a public pre-built template (`work-43ca/sandstorm`) that's used automatically — no build step needed. The template includes Node.js 24, `@anthropic-ai/claude-agent-sdk`, Python 3, git, ripgrep, and curl.
+Sandstorm ships with a public pre-built template (`work-43ca/sandstorm`) that's used automatically — no build step needed. The template includes Node.js 24, `@anthropic-ai/claude-agent-sdk`, Python 3, git, ripgrep, curl, and document processing skills (pdf, docx, pptx).
 
 To customize the template (e.g. add system packages or pre-install other dependencies), edit `build_template.py` and rebuild:
 
@@ -205,9 +206,11 @@ Files are written to `/home/user/{path}` in the sandbox before the agent starts.
 
 ### Skills
 
-Skills give the agent reusable domain knowledge via [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills). Each skill is a folder with a `SKILL.md` file — Sandstorm uploads them into the sandbox before the agent starts, where they become available as `/slash-commands`.
+Skills give the agent reusable domain knowledge via [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills). Each skill is a folder with a `SKILL.md` file (plus optional scripts and references) — Sandstorm uploads them into the sandbox before the agent starts, where they become available as `/slash-commands`.
 
-Create a skills directory with one subfolder per skill, each containing a `SKILL.md`:
+**Built-in skills:** The default sandbox template comes with three document processing skills pre-installed — **pdf**, **docx**, and **pptx**. The agent can create, edit, merge, split, and analyze documents out of the box. No configuration needed.
+
+To add your own skills, create a skills directory with one subfolder per skill, each containing a `SKILL.md`:
 
 ```
 .claude/skills/
@@ -325,6 +328,7 @@ Drop a `sandstorm.json` in your project root. See [Structured Output](#structure
 | `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
 | `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
 | `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`). `"Skill"` is auto-added when skills are present |
+| `template_skills` | `boolean` | Set `true` when skills are baked into the E2B template (skips runtime upload) |
 | `webhook_url` | `string` | Public URL for E2B lifecycle webhooks. Server auto-registers on startup, deregisters on shutdown |
 
 ### API Keys
