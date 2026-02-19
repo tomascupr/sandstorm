@@ -68,7 +68,8 @@ class TestBuildQueryRequest:
         request = _build_query_request("hello world")
         assert request.prompt == "hello world"
         assert request.timeout == 300
-        assert request.model is None
+        assert request.model == "claude-sonnet-4-6"
+        assert request.output_format == {}
 
     def test_uses_sandstorm_slack_model_env(self, monkeypatch):
         monkeypatch.setenv("SANDSTORM_SLACK_MODEL", "opus")
@@ -392,6 +393,50 @@ class TestStreamToSlack:
             )
 
         assert result["error"] == "Sandbox timeout"
+
+    def test_multi_turn_text_separated_by_newlines(self, mock_streamer, mock_client, tmp_path):
+        events = [
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "text", "text": "First response"}]},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "text", "text": "Second response"}]},
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "result",
+                    "subtype": "end_turn",
+                    "num_turns": 2,
+                    "total_cost_usd": 0.02,
+                    "model": "sonnet",
+                }
+            ),
+        ]
+
+        gen = self._make_async_generator(events)
+        request = _build_query_request("test prompt")
+
+        with (
+            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
+        ):
+            asyncio.run(
+                _stream_to_slack(
+                    request, "run-mt", mock_streamer, mock_client, "C001", "1234.5678"
+                )
+            )
+
+        calls = mock_streamer.append.call_args_list
+        # First call: no prefix
+        assert calls[0].kwargs["markdown_text"] == "First response"
+        # Second call: newline separator
+        assert calls[1].kwargs["markdown_text"] == "\n\nSecond response"
 
     def test_system_init_sets_model(self, mock_streamer, mock_client, tmp_path):
         events = [

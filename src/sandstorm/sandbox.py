@@ -437,7 +437,8 @@ def _build_agent_config(
             request.output_format
             if request.output_format is not None
             else sandstorm_config.get("output_format")
-        ),
+        )
+        or None,  # empty dict = explicitly disabled
         "agents": agents_config,
         "mcp_servers": mcp_servers,
         "has_skills": has_skills,

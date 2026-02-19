@@ -92,7 +92,7 @@ def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> Qu
     Uses SANDSTORM_SLACK_MODEL, SANDSTORM_SLACK_TIMEOUT env vars.
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
-    model = os.environ.get("SANDSTORM_SLACK_MODEL")
+    model = os.environ.get("SANDSTORM_SLACK_MODEL", "claude-sonnet-4-6")
     timeout_str = os.environ.get("SANDSTORM_SLACK_TIMEOUT", "300")
     try:
         timeout = int(timeout_str)
@@ -104,6 +104,7 @@ def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> Qu
         model=model,
         timeout=timeout,
         files=files,
+        output_format={},  # Slack is conversational — skip structured output
         anthropic_api_key=None,
         e2b_api_key=None,
         openrouter_api_key=None,
@@ -304,6 +305,7 @@ async def _stream_to_slack(
 
     start = time.monotonic()
     stopped = False
+    has_streamed_text = False
 
     run_store.create(
         id=run_id,
@@ -341,8 +343,10 @@ async def _stream_to_slack(
                     if block.get("type") == "text":
                         text = block["text"]
                         if text:
+                            prefix = "\n\n" if has_streamed_text else ""
                             try:
-                                await streamer.append(markdown_text=text)
+                                await streamer.append(markdown_text=prefix + text)
+                                has_streamed_text = True
                                 logger.info("[%s] Streamed %d chars", run_id, len(text))
                             except Exception:
                                 logger.error("[%s] streamer.append failed", run_id, exc_info=True)

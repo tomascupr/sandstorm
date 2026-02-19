@@ -436,8 +436,8 @@ class TestBuildAgentConfigOutputFormat:
         config, _ = _build_agent_config(_req(), {}, {})
         assert config["output_format"] is None
 
-    def test_empty_dict_overrides_config(self):
-        """Explicit empty dict overrides config (is not None check, not falsy)."""
+    def test_empty_dict_disables_output_format(self):
+        """Explicit empty dict disables structured output (e.g. Slack mode)."""
         cfg = {"output_format": self._FMT_A}
         config, _ = _build_agent_config(_req(output_format={}), cfg, {})
-        assert config["output_format"] == {}
+        assert config["output_format"] is None
