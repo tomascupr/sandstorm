@@ -312,8 +312,8 @@ Sandstorm uses a two-layer config system:
 
 | Layer | What it controls | How to set |
 |-------|-----------------|------------|
-| **`sandstorm.json`** | Agent behavior -- system prompt, structured output, subagents, MCP servers | Config file in project root |
-| **API request** | Per-call -- prompt, model, files, timeout | JSON body on `POST /query` |
+| **`sandstorm.json`** | Agent behavior -- system prompt, structured output, subagents, MCP servers, skills | Config file in project root |
+| **API request** | Per-call -- prompt, model, files, timeout, output format, tool/agent/skill whitelisting | JSON body on `POST /query` |
 
 ### `sandstorm.json`
 
@@ -425,6 +425,13 @@ Returns recent agent runs as a JSON array, newest first.
 | `max_turns` | `integer` | No | from config | Overrides `sandstorm.json` max_turns |
 | `timeout` | `integer` | No | `300` | Sandbox lifetime in seconds |
 | `files` | `object` | No | `null` | Files to upload (`{path: content}`) |
+| `output_format` | `object` | No | from config | Overrides `sandstorm.json` output_format |
+| `allowed_mcp_servers` | `string[]` | No | `null` (all) | Whitelist MCP servers by name from config |
+| `allowed_skills` | `string[]` | No | `null` (all) | Whitelist skills by name. Template skills are always available |
+| `allowed_tools` | `string[]` | No | from config | Override allowed tools from `sandstorm.json` |
+| `allowed_agents` | `string[]` | No | `null` (all) | Whitelist agents by name from config |
+| `extra_agents` | `object` | No | `null` | Inline agent definitions merged with config (`{name: config}`) |
+| `extra_skills` | `object` | No | `null` | Inline skill definitions merged with disk skills (`{name: markdown}`) |
 
 **Response:** `text/event-stream`
 
