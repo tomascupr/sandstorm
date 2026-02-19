@@ -511,6 +511,7 @@ def create_slack_app(
                     binary_files=binary_files or None,
                 )
                 new_id = sandbox_id_out[0] if sandbox_id_out else None
+                _sandbox_pool.pop(key, None)
                 _sandbox_pool[key] = (new_id, lock)
 
         # Evict oldest entries if pool is too large (sandboxes auto-die via E2B timeout)
@@ -632,6 +633,7 @@ def create_slack_app(
                     binary_files=binary_files or None,
                 )
                 new_id = sandbox_id_out[0] if sandbox_id_out else None
+                _sandbox_pool.pop(key, None)
                 _sandbox_pool[key] = (new_id, lock)
 
         # Evict oldest entries if pool is too large

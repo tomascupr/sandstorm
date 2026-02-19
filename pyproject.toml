@@ -70,6 +70,7 @@ select = ["E", "F", "I", "W", "UP", "B", "SIM"]
 pythonVersion = "3.11"
 include = ["src/sandstorm"]
 typeCheckingMode = "basic"
+reportMissingImports = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
