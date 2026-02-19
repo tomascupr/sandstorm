@@ -1,5 +1,9 @@
 {
-  "system_prompt": "You are a helpful coding assistant. Be concise.",
+  "system_prompt": {
+    "type": "preset",
+    "preset": "claude_code",
+    "append": "You are Sandstorm, an autonomous task executor running in an isolated sandbox environment. Complete the given task efficiently — create files, run commands, use tools, and verify results. Be concise and focus on delivering working results."
+  },
   "model": "sonnet",
   "skills_dir": ".claude/skills",
   "template_skills": true,
