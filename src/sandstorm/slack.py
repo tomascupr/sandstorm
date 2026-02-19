@@ -10,7 +10,6 @@ import os
 import re
 import time
 import uuid
-from collections import OrderedDict
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
@@ -26,8 +25,8 @@ logger = logging.getLogger(__name__)
 # Max file size to download from Slack threads (10 MB)
 _MAX_FILE_SIZE = 10 * 1024 * 1024
 
-# Max number of active threads to track for auto-response
-_MAX_ACTIVE_THREADS = 1000
+# Max sandbox pool entries (one per active thread)
+_MAX_SANDBOX_POOL = 1000
 
 # Binary MIME prefixes we skip when downloading thread files
 _BINARY_MIME_PREFIXES = ("image/", "audio/", "video/", "application/pdf", "application/zip")
@@ -234,6 +233,10 @@ async def _stream_to_slack(
     channel: str,
     thread_ts: str,
     set_status: Callable | None = None,
+    *,
+    keep_alive: bool = False,
+    sandbox_id: str | None = None,
+    sandbox_id_out: list[str] | None = None,
 ) -> dict:
     """Core bridge: consume run_agent_in_sandbox() -> stream to Slack.
 
@@ -261,7 +264,13 @@ async def _stream_to_slack(
     )
 
     try:
-        async for line in run_agent_in_sandbox(request, run_id):
+        async for line in run_agent_in_sandbox(
+            request,
+            run_id,
+            keep_alive=keep_alive,
+            sandbox_id=sandbox_id,
+            sandbox_id_out=sandbox_id_out,
+        ):
             try:
                 event = json.loads(line)
             except (json.JSONDecodeError, TypeError):
@@ -374,9 +383,9 @@ def create_slack_app(
     token = bot_token or os.environ.get("SLACK_BOT_TOKEN")
     app = AsyncApp(token=token, signing_secret=signing_secret)
 
-    # Threads where the bot has responded — follow-ups auto-trigger without @mention
-    # Bounded to prevent unbounded memory growth; oldest entries evicted first
-    _active_threads: OrderedDict[tuple[str, str], float] = OrderedDict()
+    # Sandbox reuse pool: (channel, thread_ts) -> (sandbox_id, lock)
+    # Lock serializes concurrent @mentions in the same thread
+    _sandbox_pool: dict[tuple[str, str], tuple[str | None, asyncio.Lock]] = {}
 
     # ── 1. @mention handler — primary interaction in channels ──
 
@@ -409,84 +418,84 @@ def create_slack_app(
 
         request = _build_query_request(full_prompt, files or None)
 
-        # Create async streamer (recipient IDs required for channel streaming)
-        streamer = await client.chat_stream(
-            channel=channel,
-            thread_ts=thread_ts,
-            recipient_team_id=context.get("team_id"),
-            recipient_user_id=user_id,
-        )
+        # Get or create sandbox pool entry for this thread
+        key = (channel, thread_ts)
+        if key not in _sandbox_pool:
+            _sandbox_pool[key] = (None, asyncio.Lock())
+        _, lock = _sandbox_pool[key]
 
-        # No set_status in app_mention context — pass None
-        await _stream_to_slack(request, run_id, streamer, client, channel, thread_ts)
+        async with lock:
+            # Read sandbox_id inside lock to avoid TOCTOU race
+            existing_sandbox_id = _sandbox_pool[key][0]
+            sandbox_id_out: list[str] = []
+            reuse_succeeded = False
+            if existing_sandbox_id:
+                # Try to reuse existing sandbox — only catch E2B connection errors
+                try:
+                    from e2b import SandboxException
 
-        # Track this thread so follow-up messages auto-trigger the bot
-        _active_threads[(channel, thread_ts)] = time.monotonic()
-        while len(_active_threads) > _MAX_ACTIVE_THREADS:
-            _active_threads.popitem(last=False)
+                    logger.info(
+                        "[%s] Reusing sandbox %s for thread %s",
+                        run_id,
+                        existing_sandbox_id,
+                        thread_ts,
+                    )
+                    streamer = await client.chat_stream(
+                        channel=channel,
+                        thread_ts=thread_ts,
+                        recipient_team_id=context.get("team_id"),
+                        recipient_user_id=user_id,
+                    )
+                    await _stream_to_slack(
+                        request,
+                        run_id,
+                        streamer,
+                        client,
+                        channel,
+                        thread_ts,
+                        keep_alive=True,
+                        sandbox_id=existing_sandbox_id,
+                    )
+                    reuse_succeeded = True
+                except (SandboxException, ConnectionError, OSError):
+                    # Sandbox expired or unreachable — fall through to create new
+                    logger.warning(
+                        "[%s] Sandbox %s unreachable, creating new",
+                        run_id,
+                        existing_sandbox_id,
+                    )
+
+            if not reuse_succeeded:
+                # Create new sandbox and keep it alive
+                streamer = await client.chat_stream(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    recipient_team_id=context.get("team_id"),
+                    recipient_user_id=user_id,
+                )
+                await _stream_to_slack(
+                    request,
+                    run_id,
+                    streamer,
+                    client,
+                    channel,
+                    thread_ts,
+                    keep_alive=True,
+                    sandbox_id_out=sandbox_id_out,
+                )
+                new_id = sandbox_id_out[0] if sandbox_id_out else None
+                _sandbox_pool[key] = (new_id, lock)
+
+        # Evict oldest entries if pool is too large (sandboxes auto-die via E2B timeout)
+        while len(_sandbox_pool) > _MAX_SANDBOX_POOL:
+            oldest_key = next(iter(_sandbox_pool))
+            evicted_id, _ = _sandbox_pool.pop(oldest_key)
+            if evicted_id:
+                logger.debug("Evicted sandbox %s from pool (will auto-expire)", evicted_id)
 
         # Remove :eyes: reaction on completion
         with contextlib.suppress(Exception):
             await client.reactions_remove(channel=channel, timestamp=event["ts"], name="eyes")
-
-    # ── 1b. Thread continuation — auto-respond in active threads ──
-
-    @app.event("message")
-    async def handle_thread_message(event, client, say, context):
-        # Only handle thread replies (thread_ts set and differs from ts)
-        thread_ts = event.get("thread_ts")
-        ts = event.get("ts")
-        if not thread_ts or thread_ts == ts:
-            return
-
-        channel = event.get("channel", "")
-
-        # Only handle threads we've previously responded in
-        if (channel, thread_ts) not in _active_threads:
-            return
-
-        bot_user_id = context.get("bot_user_id", "")
-
-        # Skip bot's own messages
-        if event.get("bot_id") or event.get("user") == bot_user_id:
-            return
-
-        # Skip messages that @mention the bot — handled by handle_mention
-        raw_text = event.get("text", "")
-        if f"<@{bot_user_id}>" in raw_text:
-            return
-
-        prompt = raw_text.strip()
-        if not prompt:
-            return
-
-        user_id = event.get("user", "unknown")
-
-        with contextlib.suppress(Exception):
-            await client.reactions_add(channel=channel, timestamp=ts, name="eyes")
-
-        run_id = uuid.uuid4().hex[:8]
-        messages = await _fetch_thread_messages(client, channel, thread_ts)
-        thread_context = _gather_thread_context(messages, bot_user_id)
-        files = await _download_thread_files(client, messages, bot_user_id)
-
-        full_prompt = prompt
-        if thread_context:
-            full_prompt = f"Thread context:\n{thread_context}\n\nUser request: {prompt}"
-
-        request = _build_query_request(full_prompt, files or None)
-
-        streamer = await client.chat_stream(
-            channel=channel,
-            thread_ts=thread_ts,
-            recipient_team_id=context.get("team_id"),
-            recipient_user_id=user_id,
-        )
-
-        await _stream_to_slack(request, run_id, streamer, client, channel, thread_ts)
-
-        with contextlib.suppress(Exception):
-            await client.reactions_remove(channel=channel, timestamp=ts, name="eyes")
 
     # ── 2. Assistant DM handler — conversational thread experience ──
 

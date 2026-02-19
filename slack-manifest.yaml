@@ -36,8 +36,6 @@ settings:
       - app_mention
       - assistant_thread_started
       - assistant_thread_context_changed
-      - message.channels
-      - message.groups
       - message.im
   interactivity:
     is_enabled: true

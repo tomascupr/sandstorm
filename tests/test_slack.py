@@ -244,7 +244,7 @@ class TestStreamToSlack:
     def _make_async_generator(self, events: list[str]):
         """Create an async generator from a list of JSON strings."""
 
-        async def gen(request, request_id=""):
+        async def gen(request, request_id="", **kwargs):
             for event in events:
                 yield event
 
@@ -422,3 +422,100 @@ class TestSetFeedback:
         assert run.feedback == "positive"
         assert run.feedback_user == "U123"
         assert run.cost_usd == 0.01
+
+
+class TestStreamToSlackSandboxParams:
+    """Verify that _stream_to_slack passes sandbox params to run_agent_in_sandbox."""
+
+    @pytest.fixture
+    def mock_streamer(self):
+        streamer = AsyncMock()
+        streamer.append = AsyncMock()
+        streamer.stop = AsyncMock()
+        return streamer
+
+    def test_keep_alive_passed_through(self, mock_streamer, tmp_path):
+        events = [json.dumps({"type": "result", "subtype": "end_turn", "num_turns": 1})]
+        captured_kwargs = {}
+
+        async def gen(request, request_id="", **kwargs):
+            captured_kwargs.update(kwargs)
+            for event in events:
+                yield event
+
+        request = _build_query_request("test")
+        with (
+            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
+        ):
+            asyncio.run(
+                _stream_to_slack(
+                    request,
+                    "run1",
+                    mock_streamer,
+                    AsyncMock(),
+                    "C001",
+                    "1234.5678",
+                    keep_alive=True,
+                )
+            )
+
+        assert captured_kwargs["keep_alive"] is True
+
+    def test_sandbox_id_passed_through(self, mock_streamer, tmp_path):
+        events = [json.dumps({"type": "result", "subtype": "end_turn", "num_turns": 1})]
+        captured_kwargs = {}
+
+        async def gen(request, request_id="", **kwargs):
+            captured_kwargs.update(kwargs)
+            for event in events:
+                yield event
+
+        request = _build_query_request("test")
+        with (
+            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
+        ):
+            asyncio.run(
+                _stream_to_slack(
+                    request,
+                    "run1",
+                    mock_streamer,
+                    AsyncMock(),
+                    "C001",
+                    "1234.5678",
+                    sandbox_id="sbx-existing-123",
+                )
+            )
+
+        assert captured_kwargs["sandbox_id"] == "sbx-existing-123"
+
+    def test_sandbox_id_out_passed_through(self, mock_streamer, tmp_path):
+        events = [json.dumps({"type": "result", "subtype": "end_turn", "num_turns": 1})]
+
+        async def gen(request, request_id="", **kwargs):
+            # Simulate sandbox creation populating the out param
+            if kwargs.get("sandbox_id_out") is not None:
+                kwargs["sandbox_id_out"].append("sbx-new-456")
+            for event in events:
+                yield event
+
+        request = _build_query_request("test")
+        sandbox_id_out: list[str] = []
+        with (
+            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
+        ):
+            asyncio.run(
+                _stream_to_slack(
+                    request,
+                    "run1",
+                    mock_streamer,
+                    AsyncMock(),
+                    "C001",
+                    "1234.5678",
+                    sandbox_id_out=sandbox_id_out,
+                )
+            )
+
+        assert sandbox_id_out == ["sbx-new-456"]
