@@ -28,7 +28,6 @@ oauth_config:
       - groups:history
       - im:history
       - files:read
-      - files:write
       - reactions:write
 settings:
   event_subscriptions:

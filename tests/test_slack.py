@@ -100,6 +100,28 @@ class TestFetchThreadMessages:
         assert len(result) == 1
         assert result[0]["text"] == "hello"
 
+    def test_paginates_with_cursor(self):
+        client = AsyncMock()
+        client.conversations_replies = AsyncMock(
+            side_effect=[
+                {
+                    "messages": [{"user": "U001", "text": "page1"}],
+                    "response_metadata": {"next_cursor": "cursor_abc"},
+                },
+                {
+                    "messages": [{"user": "U002", "text": "page2"}],
+                },
+            ]
+        )
+        result = asyncio.run(_fetch_thread_messages(client, "C001", "1234.5678"))
+        assert len(result) == 2
+        assert result[0]["text"] == "page1"
+        assert result[1]["text"] == "page2"
+        assert client.conversations_replies.call_count == 2
+        # Second call should include cursor
+        _, kwargs = client.conversations_replies.call_args
+        assert kwargs["cursor"] == "cursor_abc"
+
     def test_handles_api_error(self):
         client = AsyncMock()
         client.conversations_replies = AsyncMock(side_effect=Exception("API error"))

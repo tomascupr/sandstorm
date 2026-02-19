@@ -357,10 +357,9 @@ def slack_setup() -> None:
 
     load_dotenv()
 
-    # Try multiple locations: package data, repo root relative to source, CWD
+    # Try multiple locations: package data, CWD
     candidates = [
         Path(__file__).resolve().parent / "slack-manifest.yaml",  # package data
-        Path(__file__).resolve().parent.parent.parent / "slack-manifest.yaml",  # repo root
         Path.cwd() / "slack-manifest.yaml",  # CWD
     ]
     manifest_path = next((p for p in candidates if p.exists()), None)
