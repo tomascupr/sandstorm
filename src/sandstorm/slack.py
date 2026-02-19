@@ -725,6 +725,7 @@ def run_http_mode(
     from slack_bolt.adapter.starlette.async_handler import AsyncSlackRequestHandler
     from starlette.applications import Starlette
     from starlette.requests import Request
+    from starlette.responses import JSONResponse
     from starlette.routing import Route
 
     secret = signing_secret or os.environ.get("SLACK_SIGNING_SECRET")
@@ -734,6 +735,14 @@ def run_http_mode(
     async def endpoint(req: Request):
         return await app_handler.handle(req)
 
-    starlette_app = Starlette(routes=[Route("/slack/events", endpoint=endpoint, methods=["POST"])])
+    async def health(req: Request):
+        return JSONResponse({"status": "ok"})
+
+    starlette_app = Starlette(
+        routes=[
+            Route("/slack/events", endpoint=endpoint, methods=["POST"]),
+            Route("/health", endpoint=health, methods=["GET"]),
+        ]
+    )
     logger.info("Starting Sandstorm Slack bot in HTTP mode on %s:%d", host, port)
     uvicorn.run(starlette_app, host=host, port=port)
