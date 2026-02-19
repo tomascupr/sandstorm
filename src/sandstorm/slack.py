@@ -437,29 +437,15 @@ def create_slack_app(
     # Lock serializes concurrent @mentions in the same thread
     _sandbox_pool: dict[tuple[str, str], tuple[str | None, asyncio.Lock]] = {}
 
-    # ── 1. @mention handler — primary interaction in channels ──
+    # ── Shared helpers (close over _sandbox_pool) ──
 
-    @app.event("app_mention")
-    async def handle_mention(event, client, say, context):
-        channel = event["channel"]
-        thread_ts = event.get("thread_ts", event["ts"])
-        user_id = event["user"]
-        bot_user_id = context["bot_user_id"]
-
-        # Extract prompt (strip @mention)
-        raw_text = event.get("text", "")
-        prompt = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()
-        if not prompt:
-            await say(text="Mention me with a task!", thread_ts=thread_ts)
-            return
-
-        # Add :eyes: reaction as status indicator (set_status not available here)
-        with contextlib.suppress(Exception):
-            await client.reactions_add(channel=channel, timestamp=event["ts"], name="eyes")
-
-        run_id = uuid.uuid4().hex[:8]
+    async def _prepare_prompt(
+        client, channel: str, thread_ts: str, bot_user_id: str, prompt: str
+    ) -> tuple[QueryRequest, dict[str, bytes]]:
+        """Fetch thread context, resolve names, download files, build request."""
         messages = await _fetch_thread_messages(client, channel, thread_ts)
-        thread_context = _gather_thread_context(messages, bot_user_id)
+        user_names = await _resolve_user_names(client, messages, bot_user_id)
+        thread_context = _gather_thread_context(messages, bot_user_id, user_names=user_names)
         text_files, binary_files = await _download_thread_files(client, messages, bot_user_id)
 
         full_prompt = prompt
@@ -472,15 +458,27 @@ def create_slack_app(
             full_prompt += f"\n\nFiles available in your working directory:\n{file_list}"
 
         request = _build_query_request(full_prompt, text_files or None)
+        return request, binary_files
 
-        # Get or create sandbox pool entry for this thread
+    async def _run_in_sandbox_pool(
+        *,
+        request: QueryRequest,
+        run_id: str,
+        client,
+        channel: str,
+        thread_ts: str,
+        context,
+        user_id: str,
+        binary_files: dict[str, bytes],
+        set_status: Callable | None = None,
+    ) -> dict:
+        """Run agent with sandbox reuse, pool management, and eviction."""
         key = (channel, thread_ts)
         if key not in _sandbox_pool:
             _sandbox_pool[key] = (None, asyncio.Lock())
         _, lock = _sandbox_pool[key]
 
         async with lock:
-            # Read sandbox_id inside lock to avoid TOCTOU race
             existing_sandbox_id = _sandbox_pool[key][0]
             sandbox_id_out: list[str] = []
             reuse_succeeded = False
@@ -504,13 +502,13 @@ def create_slack_app(
                     client,
                     channel,
                     thread_ts,
+                    set_status=set_status,
                     keep_alive=True,
                     sandbox_id=existing_sandbox_id,
                     binary_files=binary_files or None,
                 )
                 reuse_succeeded = not metadata.get("error")
                 if not reuse_succeeded:
-                    # Sandbox expired or errored — clear dead entry
                     _sandbox_pool[key] = (None, lock)
                     logger.warning(
                         "[%s] Sandbox %s failed, creating new",
@@ -519,20 +517,20 @@ def create_slack_app(
                     )
 
             if not reuse_succeeded:
-                # Create new sandbox and keep it alive
                 streamer = await client.chat_stream(
                     channel=channel,
                     thread_ts=thread_ts,
                     recipient_team_id=context.get("team_id"),
                     recipient_user_id=user_id,
                 )
-                await _stream_to_slack(
+                metadata = await _stream_to_slack(
                     request,
                     run_id,
                     streamer,
                     client,
                     channel,
                     thread_ts,
+                    set_status=set_status,
                     keep_alive=True,
                     sandbox_id_out=sandbox_id_out,
                     binary_files=binary_files or None,
@@ -541,12 +539,52 @@ def create_slack_app(
                 _sandbox_pool.pop(key, None)
                 _sandbox_pool[key] = (new_id, lock)
 
-        # Evict oldest entries if pool is too large (sandboxes auto-die via E2B timeout)
+        # Evict oldest entries if pool is too large
         while len(_sandbox_pool) > _MAX_SANDBOX_POOL:
             oldest_key = next(iter(_sandbox_pool))
             evicted_id, _ = _sandbox_pool.pop(oldest_key)
             if evicted_id:
-                logger.debug("Evicted sandbox %s from pool (will auto-expire)", evicted_id)
+                logger.debug(
+                    "Evicted sandbox %s from pool (will auto-expire)",
+                    evicted_id,
+                )
+
+        return metadata
+
+    # ── 1. @mention handler — primary interaction in channels ──
+
+    @app.event("app_mention")
+    async def handle_mention(event, client, say, context):
+        channel = event["channel"]
+        thread_ts = event.get("thread_ts", event["ts"])
+        user_id = event["user"]
+        bot_user_id = context["bot_user_id"]
+
+        # Extract prompt (strip @mention)
+        raw_text = event.get("text", "")
+        prompt = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()
+        if not prompt:
+            await say(text="Mention me with a task!", thread_ts=thread_ts)
+            return
+
+        # Add :eyes: reaction as status indicator
+        with contextlib.suppress(Exception):
+            await client.reactions_add(channel=channel, timestamp=event["ts"], name="eyes")
+
+        run_id = uuid.uuid4().hex[:8]
+        request, binary_files = await _prepare_prompt(
+            client, channel, thread_ts, bot_user_id, prompt
+        )
+        await _run_in_sandbox_pool(
+            request=request,
+            run_id=run_id,
+            client=client,
+            channel=channel,
+            thread_ts=thread_ts,
+            context=context,
+            user_id=user_id,
+            binary_files=binary_files,
+        )
 
         # Remove :eyes: reaction on completion
         with contextlib.suppress(Exception):
@@ -589,86 +627,20 @@ def create_slack_app(
 
         await set_status("Spinning up sandbox...")
         run_id = uuid.uuid4().hex[:8]
-
-        # Thread context + file downloads (same as @mention handler)
-        messages = await _fetch_thread_messages(client, channel_id, thread_ts)
-        thread_context = _gather_thread_context(messages, bot_user_id)
-        text_files, binary_files = await _download_thread_files(client, messages, bot_user_id)
-
-        full_prompt = prompt
-        if thread_context:
-            full_prompt = f"Thread context:\n{thread_context}\n\nUser request: {prompt}"
-
-        all_files = list(text_files.keys()) + list(binary_files.keys())
-        if all_files:
-            file_list = "\n".join(f"- /home/user/{f}" for f in all_files)
-            full_prompt += f"\n\nFiles available in your working directory:\n{file_list}"
-
-        request = _build_query_request(full_prompt, text_files or None)
-
-        # Sandbox reuse (same pool as @mention handler)
-        key = (channel_id, thread_ts)
-        if key not in _sandbox_pool:
-            _sandbox_pool[key] = (None, asyncio.Lock())
-        _, lock = _sandbox_pool[key]
-
-        async with lock:
-            existing_sandbox_id = _sandbox_pool[key][0]
-            sandbox_id_out: list[str] = []
-            reuse_succeeded = False
-            if existing_sandbox_id:
-                logger.info("[%s] DM reusing sandbox %s", run_id, existing_sandbox_id)
-                streamer = await client.chat_stream(
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    recipient_team_id=context.get("team_id"),
-                    recipient_user_id=user_id,
-                )
-                metadata = await _stream_to_slack(
-                    request,
-                    run_id,
-                    streamer,
-                    client,
-                    channel_id,
-                    thread_ts,
-                    set_status=set_status,
-                    keep_alive=True,
-                    sandbox_id=existing_sandbox_id,
-                    binary_files=binary_files or None,
-                )
-                reuse_succeeded = not metadata.get("error")
-                if not reuse_succeeded:
-                    _sandbox_pool[key] = (None, lock)
-
-            if not reuse_succeeded:
-                streamer = await client.chat_stream(
-                    channel=channel_id,
-                    thread_ts=thread_ts,
-                    recipient_team_id=context.get("team_id"),
-                    recipient_user_id=user_id,
-                )
-                await _stream_to_slack(
-                    request,
-                    run_id,
-                    streamer,
-                    client,
-                    channel_id,
-                    thread_ts,
-                    set_status=set_status,
-                    keep_alive=True,
-                    sandbox_id_out=sandbox_id_out,
-                    binary_files=binary_files or None,
-                )
-                new_id = sandbox_id_out[0] if sandbox_id_out else None
-                _sandbox_pool.pop(key, None)
-                _sandbox_pool[key] = (new_id, lock)
-
-        # Evict oldest entries if pool is too large
-        while len(_sandbox_pool) > _MAX_SANDBOX_POOL:
-            oldest_key = next(iter(_sandbox_pool))
-            evicted_id, _ = _sandbox_pool.pop(oldest_key)
-            if evicted_id:
-                logger.debug("Evicted sandbox %s from pool (will auto-expire)", evicted_id)
+        request, binary_files = await _prepare_prompt(
+            client, channel_id, thread_ts, bot_user_id, prompt
+        )
+        await _run_in_sandbox_pool(
+            request=request,
+            run_id=run_id,
+            client=client,
+            channel=channel_id,
+            thread_ts=thread_ts,
+            context=context,
+            user_id=user_id,
+            binary_files=binary_files,
+            set_status=set_status,
+        )
 
     app.use(assistant)
 
