@@ -83,6 +83,70 @@ class TestFileValidation:
         assert "sub/dir/file.txt" in req.files
 
 
+class TestWhitelistFields:
+    def test_defaults_to_none(self):
+        req = QueryRequest(prompt="test")
+        assert req.allowed_mcp_servers is None
+        assert req.allowed_skills is None
+        assert req.allowed_tools is None
+        assert req.allowed_agents is None
+        assert req.extra_agents is None
+        assert req.extra_skills is None
+
+    def test_accepts_valid_string_lists(self):
+        req = QueryRequest(
+            prompt="test",
+            allowed_mcp_servers=["server-a", "server-b"],
+            allowed_skills=["my-skill"],
+            allowed_tools=["Bash", "Read"],
+            allowed_agents=["researcher"],
+        )
+        assert req.allowed_mcp_servers == ["server-a", "server-b"]
+        assert req.allowed_skills == ["my-skill"]
+        assert req.allowed_tools == ["Bash", "Read"]
+        assert req.allowed_agents == ["researcher"]
+
+    def test_empty_lists_accepted(self):
+        req = QueryRequest(
+            prompt="test",
+            allowed_mcp_servers=[],
+            allowed_skills=[],
+            allowed_tools=[],
+            allowed_agents=[],
+        )
+        assert req.allowed_mcp_servers == []
+        assert req.allowed_skills == []
+        assert req.allowed_tools == []
+        assert req.allowed_agents == []
+
+    def test_extra_skills_accepts_valid_names(self):
+        req = QueryRequest(
+            prompt="test",
+            extra_skills={"my-skill": "# Skill content", "skill_2": "content"},
+        )
+        assert req.extra_skills == {"my-skill": "# Skill content", "skill_2": "content"}
+
+    def test_extra_skills_rejects_invalid_names(self):
+        with pytest.raises(ValidationError, match="Invalid skill name"):
+            QueryRequest(prompt="test", extra_skills={"bad name!": "content"})
+
+    def test_extra_skills_rejects_dotted_names(self):
+        with pytest.raises(ValidationError, match="Invalid skill name"):
+            QueryRequest(prompt="test", extra_skills={"path..traversal": "content"})
+
+    def test_extra_agents_accepts_valid_names(self):
+        req = QueryRequest(
+            prompt="test",
+            extra_agents={"helper": {"model": "haiku"}, "my-agent_2": {"model": "sonnet"}},
+        )
+        assert "helper" in req.extra_agents
+        assert "my-agent_2" in req.extra_agents
+
+    def test_extra_agents_rejects_invalid_names(self):
+        with pytest.raises(ValidationError, match="Invalid agent name"):
+            QueryRequest(prompt="test", extra_agents={"bad name!": {"model": "haiku"}})
+
+
 class TestTimeoutBounds:
     def test_default_timeout(self):
         req = QueryRequest(prompt="test")

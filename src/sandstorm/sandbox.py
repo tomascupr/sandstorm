@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import posixpath
-import re
 import shlex
 import time
 from collections.abc import AsyncGenerator
@@ -13,7 +12,7 @@ from pathlib import Path
 
 from e2b import AsyncSandbox, NotFoundException
 
-from .models import QueryRequest
+from .models import NAME_PATTERN, QueryRequest
 from .telemetry import (
     get_tracer,
     record_agent_execution,
@@ -36,7 +35,7 @@ SDK_VERSION = "0.2.42"
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
 _RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
-_SKILL_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
+_SKILL_NAME_PATTERN = NAME_PATTERN
 
 # Load the runner script that executes inside the sandbox
 _RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
@@ -365,6 +364,89 @@ def _to_str(data) -> str:
     return data if isinstance(data, str) else str(data)
 
 
+def _build_agent_config(
+    request: QueryRequest,
+    sandstorm_config: dict,
+    disk_skills: dict[str, dict[str, str]],
+) -> tuple[dict, dict[str, dict[str, str]]]:
+    """Build agent_config dict and merged_skills from config + request overrides.
+
+    Returns (agent_config, merged_skills) so the caller can upload skills
+    and write agent_config.json into the sandbox.
+    """
+    merged_skills = dict(disk_skills)
+
+    # Merge extra skills first (wrap inline content as SKILL.md), then apply whitelist.
+    # Note: template_skills are baked into the sandbox image and always present
+    # regardless of this whitelist — only disk_skills and extra_skills are filtered.
+    if request.extra_skills:
+        for name, content in request.extra_skills.items():
+            merged_skills[name] = {"SKILL.md": content}
+    if request.allowed_skills is not None:
+        allowed = set(request.allowed_skills)
+        merged_skills = {k: v for k, v in merged_skills.items() if k in allowed}
+
+    has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
+
+    # Apply MCP servers whitelist
+    mcp_servers = sandstorm_config.get("mcp_servers")
+    if mcp_servers is not None and request.allowed_mcp_servers is not None:
+        allowed = set(request.allowed_mcp_servers)
+        mcp_servers = {k: v for k, v in mcp_servers.items() if k in allowed}
+
+    # Merge extra agents first, then apply whitelist to combined result
+    agents_config = sandstorm_config.get("agents")
+    if isinstance(agents_config, list) and (
+        request.extra_agents or request.allowed_agents is not None
+    ):
+        raise ValueError(
+            "extra_agents and allowed_agents require agents to be a dict"
+            " in sandstorm.json, got list"
+        )
+    if request.extra_agents:
+        agents_config = dict(agents_config) if agents_config is not None else {}
+        agents_config.update(request.extra_agents)
+    agents_whitelist = request.allowed_agents  # None = use all, [] = use none
+    if isinstance(agents_config, dict) and agents_whitelist is not None:
+        allowed = set(agents_whitelist)
+        agents_config = {k: v for k, v in agents_config.items() if k in allowed}
+
+    # Request-level allowed_tools overrides sandstorm.json
+    allowed_tools_from_request = request.allowed_tools is not None
+    allowed_tools = (
+        request.allowed_tools
+        if allowed_tools_from_request
+        else sandstorm_config.get("allowed_tools")
+    )
+    # Auto-add "Skill" only for config-sourced allowed_tools (not explicit request override)
+    if (
+        allowed_tools is not None
+        and has_skills
+        and not allowed_tools_from_request
+        and "Skill" not in allowed_tools
+    ):
+        allowed_tools = [*allowed_tools, "Skill"]
+
+    agent_config = {
+        "prompt": request.prompt,
+        "cwd": "/home/user",
+        "model": request.model or sandstorm_config.get("model"),
+        "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
+        "system_prompt": sandstorm_config.get("system_prompt"),
+        "output_format": (
+            request.output_format
+            if request.output_format is not None
+            else sandstorm_config.get("output_format")
+        ),
+        "agents": agents_config,
+        "mcp_servers": mcp_servers,
+        "has_skills": has_skills,
+        "allowed_tools": allowed_tools,
+    }
+
+    return agent_config, merged_skills
+
+
 async def run_agent_in_sandbox(
     request: QueryRequest,
     request_id: str = "",
@@ -406,6 +488,14 @@ async def run_agent_in_sandbox(
     sandstorm_config = load_sandstorm_config() or {}
     task = None
 
+    # Load skills from skills_dir (needed by both paths for _build_agent_config)
+    disk_skills: dict[str, dict[str, str]] = {}
+    if sandstorm_config.get("skills_dir"):
+        disk_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
+
+    agent_config, merged_skills = _build_agent_config(request, sandstorm_config, disk_skills)
+    has_skills = agent_config["has_skills"]
+
     if sandbox_id:
         # --- Reconnect path: reuse an existing sandbox ---
         logger.info("[%s] Reconnecting to sandbox %s", request_id, sandbox_id)
@@ -413,28 +503,12 @@ async def run_agent_in_sandbox(
         await sbx.set_timeout(request.timeout)
         sandbox_started()
 
-        # Load skills info for agent_config (skills themselves are already in sandbox)
-        merged_skills: dict[str, dict[str, str]] = {}
-        if sandstorm_config.get("skills_dir"):
-            merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
-        has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
-
-        allowed_tools = sandstorm_config.get("allowed_tools")
-        if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
-            allowed_tools = [*allowed_tools, "Skill"]
-
-        agent_config = {
-            "prompt": request.prompt,
-            "cwd": "/home/user",
-            "model": request.model or sandstorm_config.get("model"),
-            "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
-            "system_prompt": sandstorm_config.get("system_prompt"),
-            "output_format": sandstorm_config.get("output_format"),
-            "agents": sandstorm_config.get("agents"),
-            "mcp_servers": sandstorm_config.get("mcp_servers"),
-            "has_skills": has_skills,
-            "allowed_tools": allowed_tools,
+        # Upload extra skills that aren't already in the sandbox
+        extra_skills_to_upload = {
+            k: v for k, v in merged_skills.items() if k not in disk_skills
         }
+        if extra_skills_to_upload:
+            await _upload_skills(sbx, extra_skills_to_upload, request_id)
 
         # Upload user files if provided
         if request.files:
@@ -490,41 +564,12 @@ async def run_agent_in_sandbox(
     try:
         if not sandbox_id:
             # Full setup only needed for fresh sandboxes
-            # Load skills from skills_dir
-            merged_skills = {}
-            if sandstorm_config.get("skills_dir"):
-                merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
-
-            has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
-
             # Build Claude Agent SDK settings
             settings: dict = {
                 "permissions": {"allow": [], "deny": []},
             }
             if not has_skills:
                 settings["env"] = {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}
-
-            # Auto-add "Skill" to allowed_tools if user set allowed_tools but forgot it
-            allowed_tools = sandstorm_config.get("allowed_tools")
-            if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
-                allowed_tools = [*allowed_tools, "Skill"]
-
-            # Build agent config: sandstorm.json (base) + request overrides
-            agent_config = {
-                "prompt": request.prompt,
-                "cwd": "/home/user",
-                # Request overrides sandstorm.json
-                "model": request.model or sandstorm_config.get("model"),
-                "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
-                # These come from sandstorm.json only
-                "system_prompt": sandstorm_config.get("system_prompt"),
-                "output_format": sandstorm_config.get("output_format"),
-                "agents": sandstorm_config.get("agents"),
-                "mcp_servers": sandstorm_config.get("mcp_servers"),
-                # Skills configuration
-                "has_skills": has_skills,
-                "allowed_tools": allowed_tools,
-            }
 
             # Create all needed directories in a single command
             dirs = ["/home/user/.claude"]
@@ -535,9 +580,16 @@ async def run_agent_in_sandbox(
                 timeout=5,
             )
 
-            # Upload skills (batch mkdir + batch write) — skip if baked into template
-            if merged_skills and not sandstorm_config.get("template_skills"):
-                await _upload_skills(sbx, merged_skills, request_id)
+            # Upload skills (batch mkdir + batch write)
+            # When template_skills is set, disk skills are already baked into the
+            # sandbox image — only upload extra skills that aren't in the template.
+            skills_to_upload = merged_skills
+            if sandstorm_config.get("template_skills"):
+                skills_to_upload = {
+                    k: v for k, v in merged_skills.items() if k not in disk_skills
+                }
+            if skills_to_upload:
+                await _upload_skills(sbx, skills_to_upload, request_id)
 
             # Upload user files (batch write)
             if request.files:

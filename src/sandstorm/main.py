@@ -280,7 +280,7 @@ async def query(request: QueryRequest):
                     except (json.JSONDecodeError, TypeError):
                         pass
                     yield {"data": line}
-            except (RuntimeError, SandboxException, AuthenticationException) as e:
+            except (ValueError, RuntimeError, SandboxException, AuthenticationException) as e:
                 set_span_error(span, e)
                 record_error(error_type=type(e).__name__)
                 record_request(model=request.model, status="error")
