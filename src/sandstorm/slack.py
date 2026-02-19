@@ -648,60 +648,45 @@ def create_slack_app(
 
     # ── 3. Feedback action handlers ──
 
-    @app.action("sandstorm_feedback_positive")
-    async def handle_positive(ack, body, client):
+    async def _handle_feedback(ack, body, client, *, sentiment: str, emoji: str, label: str):
         await ack()
         run_id = body["actions"][0]["value"]
         user = body["user"]["id"]
-        run_store.set_feedback(run_id, "positive", user)
+        run_store.set_feedback(run_id, sentiment, user)
 
         # Replace buttons with confirmation
         message = body.get("message", {})
         channel = body["channel"]["id"]
         ts = message.get("ts")
         blocks = message.get("blocks", [])
-        # Remove actions block, add confirmation context
         updated_blocks = [b for b in blocks if b.get("type") != "actions"]
         updated_blocks.append(
             {
                 "type": "context",
-                "elements": [
-                    {"type": "mrkdwn", "text": f"\U0001f44d <@{user}> found this helpful"}
-                ],
+                "elements": [{"type": "mrkdwn", "text": f"{emoji} <@{user}> {label}"}],
             }
         )
         if ts:
             await client.chat_update(
                 channel=channel, ts=ts, blocks=updated_blocks, text="Feedback recorded"
             )
+
+    @app.action("sandstorm_feedback_positive")
+    async def handle_positive(ack, body, client):
+        await _handle_feedback(
+            ack, body, client, sentiment="positive", emoji="\U0001f44d", label="found this helpful"
+        )
 
     @app.action("sandstorm_feedback_negative")
     async def handle_negative(ack, body, client):
-        await ack()
-        run_id = body["actions"][0]["value"]
-        user = body["user"]["id"]
-        run_store.set_feedback(run_id, "negative", user)
-
-        message = body.get("message", {})
-        channel = body["channel"]["id"]
-        ts = message.get("ts")
-        blocks = message.get("blocks", [])
-        updated_blocks = [b for b in blocks if b.get("type") != "actions"]
-        updated_blocks.append(
-            {
-                "type": "context",
-                "elements": [
-                    {
-                        "type": "mrkdwn",
-                        "text": f"\U0001f44e <@{user}> found this not helpful",
-                    }
-                ],
-            }
+        await _handle_feedback(
+            ack,
+            body,
+            client,
+            sentiment="negative",
+            emoji="\U0001f44e",
+            label="found this not helpful",
         )
-        if ts:
-            await client.chat_update(
-                channel=channel, ts=ts, blocks=updated_blocks, text="Feedback recorded"
-            )
 
     return app
 
