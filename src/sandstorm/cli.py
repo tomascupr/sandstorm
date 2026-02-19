@@ -411,6 +411,13 @@ def slack_setup() -> None:
         bot_user = auth.get("user", "unknown")
         click.echo(f'\n  Connected to workspace "{team}"')
         click.echo(f"  Bot user: @{bot_user}\n")
+
+        # Hint about setting a profile photo
+        icon_path = Path(__file__).resolve().parent / "assets" / "sandstorm-icon.png"
+        if icon_path.exists():
+            click.echo("  Tip: Set a bot icon at your app's Basic Information page:")
+            click.echo("  https://api.slack.com/apps → Display Information → App Icon")
+            click.echo(f"  Icon bundled at: {icon_path}\n")
     except ImportError:
         click.echo(
             "\n  Warning: slack-sdk not installed — skipping connectivity test.",
