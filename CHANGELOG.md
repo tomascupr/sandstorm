@@ -2,6 +2,12 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.7.0] - 2026-02-19
+
+### Features
+
+- add Slack bot integration (#31)
+
 ## [0.6.0] - 2026-02-18
 
 ### Features
@@ -10,6 +16,10 @@ All notable changes to Sandstorm will be documented in this file.
 - bake document skills (pdf, docx, pptx) into E2B template (#29)
 - DX improvements for API docs, config, and error handling (#26)
 - batch sandbox writes, metadata, and webhook support (#25)
+
+### Miscellaneous
+
+- release v0.6.0 (#30)
 
 ## [0.5.0] - 2026-02-17
 
