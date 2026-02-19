@@ -14,6 +14,7 @@ from sandstorm.slack import (  # noqa: E402
     _download_thread_files,
     _fetch_thread_messages,
     _gather_thread_context,
+    _resolve_user_names,
     _stream_to_slack,
 )
 from sandstorm.store import RunStore  # noqa: E402
@@ -603,3 +604,70 @@ class TestStreamToSlackSandboxParams:
             )
 
         assert captured_kwargs["binary_files"] == {"photo.png": b"\x89PNG\r\n"}
+
+
+class TestResolveUserNames:
+    def test_resolves_display_names(self):
+        client = AsyncMock()
+        client.users_info = AsyncMock(
+            return_value={
+                "user": {"profile": {"display_name": "Alice", "real_name": "Alice Smith"}}
+            }
+        )
+        messages = [{"user": "U001", "text": "hello"}]
+        result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
+        assert result == {"U001": "Alice"}
+
+    def test_falls_back_to_real_name(self):
+        client = AsyncMock()
+        client.users_info = AsyncMock(
+            return_value={"user": {"profile": {"display_name": "", "real_name": "Bob Jones"}}}
+        )
+        messages = [{"user": "U002", "text": "hi"}]
+        result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
+        assert result == {"U002": "Bob Jones"}
+
+    def test_falls_back_to_uid_on_error(self):
+        client = AsyncMock()
+        client.users_info = AsyncMock(side_effect=Exception("API error"))
+        messages = [{"user": "U003", "text": "test"}]
+        result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
+        assert result == {"U003": "U003"}
+
+    def test_excludes_bot_user(self):
+        client = AsyncMock()
+        client.users_info = AsyncMock(
+            return_value={"user": {"profile": {"display_name": "Alice"}}}
+        )
+        messages = [
+            {"user": "U001", "text": "hello"},
+            {"user": "BBOT", "text": "response"},
+        ]
+        result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
+        assert "BBOT" not in result
+        assert "U001" in result
+
+
+class TestGatherThreadContextWithNames:
+    def test_uses_display_names_when_provided(self):
+        messages = [
+            {"user": "U001", "text": "Hey there"},
+            {"user": "U002", "text": "Hello"},
+        ]
+        user_names = {"U001": "Alice", "U002": "Bob"}
+        result = _gather_thread_context(messages, "BBOT", user_names=user_names)
+        assert "[Alice] Hey there" in result
+        assert "[Bob] Hello" in result
+        assert "[U001]" not in result
+        assert "[U002]" not in result
+
+    def test_falls_back_to_uid_for_unknown_users(self):
+        messages = [{"user": "U999", "text": "Unknown user"}]
+        user_names = {"U001": "Alice"}
+        result = _gather_thread_context(messages, "BBOT", user_names=user_names)
+        assert "[U999] Unknown user" in result
+
+    def test_uses_raw_uid_when_names_not_provided(self):
+        messages = [{"user": "U001", "text": "Hello"}]
+        result = _gather_thread_context(messages, "BBOT")
+        assert "[U001] Hello" in result

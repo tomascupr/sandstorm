@@ -138,7 +138,31 @@ async def _fetch_thread_messages(client, channel: str, thread_ts: str) -> list[d
         return []
 
 
-def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
+async def _resolve_user_names(client, messages: list[dict], bot_user_id: str) -> dict[str, str]:
+    """Resolve Slack user IDs to display names.
+
+    Returns {uid: display_name} mapping. Falls back to uid on API error.
+    """
+    uids = {
+        msg.get("user", "")
+        for msg in messages
+        if msg.get("user") and msg.get("user") != bot_user_id
+    }
+    names: dict[str, str] = {}
+    for uid in uids:
+        try:
+            resp = await client.users_info(user=uid)
+            profile = resp.get("user", {}).get("profile", {})
+            names[uid] = profile.get("display_name") or profile.get("real_name") or uid
+        except Exception:
+            logger.warning("Failed to resolve user name for %s", uid)
+            names[uid] = uid
+    return names
+
+
+def _gather_thread_context(
+    messages: list[dict], bot_user_id: str, *, user_names: dict[str, str] | None = None
+) -> str:
     """Format thread messages into a context string.
 
     Includes bot's own messages (prefixed [Sandstorm]) for conversational
@@ -160,8 +184,10 @@ def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
                 lines.append(f"[Sandstorm] {text}")
             continue  # skip file attachments from bot
 
+        display = user_names.get(user, user) if user_names else user
+
         if text:
-            lines.append(f"[{user}] {text}")
+            lines.append(f"[{display}] {text}")
 
         # Note attached files
         for f in msg.get("files", []):
@@ -169,7 +195,7 @@ def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
             mimetype = f.get("mimetype", "unknown")
             size = f.get("size", 0)
             size_kb = size / 1024
-            lines.append(f"[{user}] [attached: {name} ({mimetype}, {size_kb:.0f}KB)]")
+            lines.append(f"[{display}] [attached: {name} ({mimetype}, {size_kb:.0f}KB)]")
 
     return "\n".join(lines)
 
