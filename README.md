@@ -28,6 +28,7 @@ Most companies want to use AI agents but hit the same wall: infrastructure, secu
 - **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
 - **File uploads** -- send code, data, or configs for the agent to work with
+- **Slack bot** -- [@mention in channels](docs/slack.md), DM threads, file uploads, streaming responses, multi-turn conversations with sandbox reuse
 
 ### Get Started
 
@@ -376,6 +377,18 @@ The dashboard auto-refreshes every 3 seconds, showing status, model, cost, turns
 The `GET /runs` endpoint returns the same data as JSON for programmatic access.
 
 > **Note:** On Vercel, run history is limited to the current function invocation (ephemeral filesystem). For persistent history, use a long-running server.
+
+## Slack Bot
+
+Run Sandstorm agents directly in Slack — @mention in channels for quick tasks, or DM for 1:1 conversations. Responses stream in real-time, files uploaded in threads are available to the agent, and follow-up messages reuse the same sandbox.
+
+```bash
+pip install "duvo-sandstorm[slack]"
+ds slack setup    # interactive wizard — creates app, saves tokens to .env
+ds slack start    # Socket Mode (dev, no public URL needed)
+```
+
+Then `@Sandstorm <task>` in any channel. For the full guide (HTTP mode, configuration, features), see [docs/slack.md](docs/slack.md).
 
 ## API Reference
 

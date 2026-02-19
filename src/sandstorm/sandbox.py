@@ -366,7 +366,13 @@ def _to_str(data) -> str:
 
 
 async def run_agent_in_sandbox(
-    request: QueryRequest, request_id: str = ""
+    request: QueryRequest,
+    request_id: str = "",
+    *,
+    keep_alive: bool = False,
+    sandbox_id: str | None = None,
+    sandbox_id_out: list[str] | None = None,
+    binary_files: dict[str, bytes] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Create an E2B sandbox, run the Claude Agent SDK query(), and yield messages."""
     queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
@@ -397,110 +403,175 @@ async def run_agent_in_sandbox(
                         )
                     )
 
-    # Build sandbox env vars: API key + any provider env vars from .env
-    sandbox_envs: dict[str, str] = {}
-    if request.anthropic_api_key:
-        sandbox_envs["ANTHROPIC_API_KEY"] = request.anthropic_api_key
-    for key in _PROVIDER_ENV_KEYS:
-        val = os.environ.get(key)
-        if val:
-            sandbox_envs[key] = val
-
-    # Per-request OpenRouter key overrides env var
-    if request.openrouter_api_key:
-        sandbox_envs["ANTHROPIC_AUTH_TOKEN"] = request.openrouter_api_key
-
-    # When using a custom base URL with auth token (e.g. OpenRouter), the SDK
-    # must NOT receive a real ANTHROPIC_API_KEY — otherwise it validates model
-    # names against Anthropic's API and rejects non-Claude models.
-    if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get("ANTHROPIC_AUTH_TOKEN"):
-        sandbox_envs["ANTHROPIC_API_KEY"] = ""
-
-    # Eagerly read GCP credentials (TOCTOU fix: read now, upload later)
-    gcp_creds_content = _read_gcp_credentials()
-    if gcp_creds_content:
-        sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
-
     sandstorm_config = load_sandstorm_config() or {}
-
-    sbx = await _create_sandbox(request.e2b_api_key, request.timeout, sandbox_envs, request_id)
-
     task = None
-    try:
-        # Load skills from skills_dir
+
+    if sandbox_id:
+        # --- Reconnect path: reuse an existing sandbox ---
+        logger.info("[%s] Reconnecting to sandbox %s", request_id, sandbox_id)
+        sbx = await AsyncSandbox.connect(sandbox_id, api_key=request.e2b_api_key)
+        await sbx.set_timeout(request.timeout)
+        sandbox_started()
+
+        # Load skills info for agent_config (skills themselves are already in sandbox)
         merged_skills: dict[str, dict[str, str]] = {}
         if sandstorm_config.get("skills_dir"):
             merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
-
         has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
 
-        # Build Claude Agent SDK settings
-        settings: dict = {
-            "permissions": {"allow": [], "deny": []},
-        }
-        if not has_skills:
-            settings["env"] = {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}
-
-        # Auto-add "Skill" to allowed_tools if user set allowed_tools but forgot it
         allowed_tools = sandstorm_config.get("allowed_tools")
         if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
             allowed_tools = [*allowed_tools, "Skill"]
 
-        # Build agent config: sandstorm.json (base) + request overrides
         agent_config = {
             "prompt": request.prompt,
             "cwd": "/home/user",
-            # Request overrides sandstorm.json
             "model": request.model or sandstorm_config.get("model"),
             "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
-            # These come from sandstorm.json only
             "system_prompt": sandstorm_config.get("system_prompt"),
             "output_format": sandstorm_config.get("output_format"),
             "agents": sandstorm_config.get("agents"),
             "mcp_servers": sandstorm_config.get("mcp_servers"),
-            # Skills configuration
             "has_skills": has_skills,
             "allowed_tools": allowed_tools,
         }
 
-        # Create all needed directories in a single command
-        dirs = ["/home/user/.claude"]
-        if gcp_creds_content:
-            dirs.append(posixpath.dirname(_GCP_CREDENTIALS_SANDBOX_PATH))
-        await sbx.commands.run(
-            " && ".join(f"mkdir -p {shlex.quote(d)}" for d in dirs),
-            timeout=5,
-        )
-
-        # Upload skills (batch mkdir + batch write) — skip if baked into template
-        if merged_skills and not sandstorm_config.get("template_skills"):
-            await _upload_skills(sbx, merged_skills, request_id)
-
-        # Upload user files (batch write)
+        # Upload user files if provided
         if request.files:
             await _upload_files(sbx, request.files, request_id)
+        if binary_files:
+            logger.info("[%s] Uploading %d binary files", request_id, len(binary_files))
+            await sbx.files.write_files(
+                [
+                    {"path": f"/home/user/{path}", "data": data}
+                    for path, data in binary_files.items()
+                ]
+            )
 
-        # Batch-write all infrastructure files in a single API call
-        if gcp_creds_content:
-            logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
+        # Write new agent_config with the new prompt
         await sbx.files.write_files(
             [
-                {
-                    "path": "/home/user/.claude/settings.json",
-                    "data": json.dumps(settings, indent=2),
-                },
-                {"path": "/opt/agent-runner/runner.mjs", "data": _RUNNER_SCRIPT},
                 {
                     "path": "/opt/agent-runner/agent_config.json",
                     "data": json.dumps(agent_config),
                 },
-                *(
-                    [{"path": _GCP_CREDENTIALS_SANDBOX_PATH, "data": gcp_creds_content}]
-                    if gcp_creds_content
-                    else []
-                ),
             ]
         )
+    else:
+        # --- Normal create path ---
+        # Build sandbox env vars: API key + any provider env vars from .env
+        sandbox_envs: dict[str, str] = {}
+        if request.anthropic_api_key:
+            sandbox_envs["ANTHROPIC_API_KEY"] = request.anthropic_api_key
+        for key in _PROVIDER_ENV_KEYS:
+            val = os.environ.get(key)
+            if val:
+                sandbox_envs[key] = val
+
+        # Per-request OpenRouter key overrides env var
+        if request.openrouter_api_key:
+            sandbox_envs["ANTHROPIC_AUTH_TOKEN"] = request.openrouter_api_key
+
+        # When using a custom base URL with auth token (e.g. OpenRouter), the SDK
+        # must NOT receive a real ANTHROPIC_API_KEY — otherwise it validates model
+        # names against Anthropic's API and rejects non-Claude models.
+        if sandbox_envs.get("ANTHROPIC_BASE_URL") and sandbox_envs.get("ANTHROPIC_AUTH_TOKEN"):
+            sandbox_envs["ANTHROPIC_API_KEY"] = ""
+
+        # Eagerly read GCP credentials (TOCTOU fix: read now, upload later)
+        gcp_creds_content = _read_gcp_credentials()
+        if gcp_creds_content:
+            sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
+
+        sbx = await _create_sandbox(request.e2b_api_key, request.timeout, sandbox_envs, request_id)
+        if sandbox_id_out is not None:
+            sandbox_id_out.append(sbx.sandbox_id)
+
+    try:
+        if not sandbox_id:
+            # Full setup only needed for fresh sandboxes
+            # Load skills from skills_dir
+            merged_skills = {}
+            if sandstorm_config.get("skills_dir"):
+                merged_skills.update(_load_skills_dir(sandstorm_config["skills_dir"]))
+
+            has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
+
+            # Build Claude Agent SDK settings
+            settings: dict = {
+                "permissions": {"allow": [], "deny": []},
+            }
+            if not has_skills:
+                settings["env"] = {"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"}
+
+            # Auto-add "Skill" to allowed_tools if user set allowed_tools but forgot it
+            allowed_tools = sandstorm_config.get("allowed_tools")
+            if allowed_tools is not None and has_skills and "Skill" not in allowed_tools:
+                allowed_tools = [*allowed_tools, "Skill"]
+
+            # Build agent config: sandstorm.json (base) + request overrides
+            agent_config = {
+                "prompt": request.prompt,
+                "cwd": "/home/user",
+                # Request overrides sandstorm.json
+                "model": request.model or sandstorm_config.get("model"),
+                "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
+                # These come from sandstorm.json only
+                "system_prompt": sandstorm_config.get("system_prompt"),
+                "output_format": sandstorm_config.get("output_format"),
+                "agents": sandstorm_config.get("agents"),
+                "mcp_servers": sandstorm_config.get("mcp_servers"),
+                # Skills configuration
+                "has_skills": has_skills,
+                "allowed_tools": allowed_tools,
+            }
+
+            # Create all needed directories in a single command
+            dirs = ["/home/user/.claude"]
+            if gcp_creds_content:
+                dirs.append(posixpath.dirname(_GCP_CREDENTIALS_SANDBOX_PATH))
+            await sbx.commands.run(
+                " && ".join(f"mkdir -p {shlex.quote(d)}" for d in dirs),
+                timeout=5,
+            )
+
+            # Upload skills (batch mkdir + batch write) — skip if baked into template
+            if merged_skills and not sandstorm_config.get("template_skills"):
+                await _upload_skills(sbx, merged_skills, request_id)
+
+            # Upload user files (batch write)
+            if request.files:
+                await _upload_files(sbx, request.files, request_id)
+            if binary_files:
+                logger.info("[%s] Uploading %d binary files", request_id, len(binary_files))
+                await sbx.files.write_files(
+                    [
+                        {"path": f"/home/user/{path}", "data": data}
+                        for path, data in binary_files.items()
+                    ]
+                )
+
+            # Batch-write all infrastructure files in a single API call
+            if gcp_creds_content:
+                logger.info("[%s] Uploading GCP credentials to sandbox", request_id)
+            await sbx.files.write_files(
+                [
+                    {
+                        "path": "/home/user/.claude/settings.json",
+                        "data": json.dumps(settings, indent=2),
+                    },
+                    {"path": "/opt/agent-runner/runner.mjs", "data": _RUNNER_SCRIPT},
+                    {
+                        "path": "/opt/agent-runner/agent_config.json",
+                        "data": json.dumps(agent_config),
+                    },
+                    *(
+                        [{"path": _GCP_CREDENTIALS_SANDBOX_PATH, "data": gcp_creds_content}]
+                        if gcp_creds_content
+                        else []
+                    ),
+                ]
+            )
 
         # Run the SDK query() via the runner script
         logger.info(
@@ -556,4 +627,21 @@ async def run_agent_in_sandbox(
 
     finally:
         sandbox_stopped()
-        await _cleanup(task, sbx, request_id)
+        if keep_alive:
+            if task is not None and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await task
+            elif task is not None:
+                try:
+                    task.result()
+                except Exception:
+                    logger.warning("[%s] Task exception suppressed", request_id, exc_info=True)
+            logger.info(
+                "[%s] Keeping sandbox %s alive (timeout=%ds)",
+                request_id,
+                sbx.sandbox_id,
+                request.timeout,
+            )
+        else:
+            await _cleanup(task, sbx, request_id)

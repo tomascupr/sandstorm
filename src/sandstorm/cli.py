@@ -339,3 +339,150 @@ def webhook_test(url: str, secret: str | None) -> None:
     except urllib.error.URLError as exc:
         click.echo(f"✗ Unreachable: {exc.reason}", err=True)
         raise SystemExit(1) from exc
+
+
+# ── Slack bot ─────────────────────────────────────────────────────────────────
+
+
+@cli.group()
+def slack() -> None:
+    """Sandstorm Slack bot."""
+
+
+@slack.command("setup")
+def slack_setup() -> None:
+    """Interactive setup wizard — creates Slack app and saves tokens to .env."""
+    import urllib.parse
+    import webbrowser
+
+    load_dotenv()
+
+    # Try multiple locations: package data, CWD
+    candidates = [
+        Path(__file__).resolve().parent / "slack-manifest.yaml",  # package data
+        Path.cwd() / "slack-manifest.yaml",  # CWD
+    ]
+    manifest_path = next((p for p in candidates if p.exists()), None)
+    if manifest_path is None:
+        click.echo("Error: slack-manifest.yaml not found", err=True)
+        raise SystemExit(1)
+
+    manifest_content = manifest_path.read_text()
+
+    click.echo("\n  Sandstorm Slack Bot Setup")
+    click.echo("  " + "-" * 25 + "\n")
+
+    # Step 1: Open browser with manifest
+    encoded = urllib.parse.quote(manifest_content)
+    create_url = f"https://api.slack.com/apps?new_app=1&manifest_yaml={encoded}"
+
+    click.echo("  Step 1: Create your Slack app (opens browser)")
+    click.echo(f"  -> {create_url[:80]}...")
+    click.echo()
+    click.echo('  Select your workspace and click "Create".')
+    click.echo('  Then click "Install to Workspace" and approve.\n')
+
+    try:
+        webbrowser.open(create_url)
+    except Exception:
+        click.echo("  (Could not open browser — use the URL above)\n", err=True)
+
+    # Step 2: Collect tokens
+    click.echo("  Step 2: Copy your tokens\n")
+
+    bot_token = click.prompt("  Bot Token (xoxb-...)", type=str).strip()
+    if not bot_token.startswith("xoxb-"):
+        click.echo("Error: Bot token should start with 'xoxb-'", err=True)
+        raise SystemExit(1)
+
+    app_token = click.prompt("  App Token (xapp-...)", type=str).strip()
+    if not app_token.startswith("xapp-"):
+        click.echo("Error: App token should start with 'xapp-'", err=True)
+        raise SystemExit(1)
+
+    # Step 3: Test connectivity
+    try:
+        from slack_sdk import WebClient
+
+        client = WebClient(token=bot_token)
+        auth = client.auth_test()
+        team = auth.get("team", "unknown")
+        bot_user = auth.get("user", "unknown")
+        click.echo(f'\n  Connected to workspace "{team}"')
+        click.echo(f"  Bot user: @{bot_user}\n")
+
+        # Hint about setting a profile photo
+        icon_path = Path(__file__).resolve().parent / "assets" / "sandstorm-icon.png"
+        if icon_path.exists():
+            click.echo("  Tip: Set a bot icon at your app's Basic Information page:")
+            click.echo("  https://api.slack.com/apps → Display Information → App Icon")
+            click.echo(f"  Icon bundled at: {icon_path}\n")
+    except ImportError:
+        click.echo(
+            "\n  Warning: slack-sdk not installed — skipping connectivity test.",
+            err=True,
+        )
+        click.echo('  Install with: pip install "duvo-sandstorm[slack]"\n', err=True)
+    except Exception as exc:
+        click.echo(f"\n  Warning: Could not verify token: {exc}", err=True)
+
+    # Step 4: Save to .env
+    from dotenv import set_key
+
+    env_path = str(Path.cwd() / ".env")
+    set_key(env_path, "SLACK_BOT_TOKEN", bot_token)
+    set_key(env_path, "SLACK_APP_TOKEN", app_token)
+    click.echo("  Saved SLACK_BOT_TOKEN and SLACK_APP_TOKEN to .env\n")
+
+    # Step 5: Optionally start
+    if click.confirm("  Start the bot now?", default=True):
+        click.echo()
+        _do_slack_start_socket()
+
+
+@slack.command("start")
+@click.option("--http", "use_http", is_flag=True, help="Use HTTP mode instead of Socket Mode.")
+@click.option("--host", default="0.0.0.0", help="Bind address (HTTP mode).")
+@click.option("--port", "-p", default=3000, type=int, help="Bind port (HTTP mode).")
+def slack_start(use_http: bool, host: str, port: int) -> None:
+    """Start the Slack bot."""
+    load_dotenv()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATEFMT,
+        stream=sys.stderr,
+    )
+
+    if use_http:
+        try:
+            from .slack import run_http_mode
+
+            run_http_mode(host=host, port=port)
+        except ImportError as exc:
+            click.echo(
+                "Error: Slack dependencies not installed."
+                ' Run: pip install "duvo-sandstorm[slack]"',
+                err=True,
+            )
+            raise SystemExit(1) from exc
+    else:
+        _do_slack_start_socket()
+
+
+def _do_slack_start_socket() -> None:
+    """Start the Slack bot in Socket Mode."""
+    try:
+        from .slack import run_socket_mode
+
+        run_socket_mode()
+    except ImportError as exc:
+        click.echo(
+            'Error: Slack dependencies not installed. Run: pip install "duvo-sandstorm[slack]"',
+            err=True,
+        )
+        raise SystemExit(1) from exc
+    except KeyboardInterrupt as exc:
+        click.echo("Interrupted.", err=True)
+        raise SystemExit(130) from exc
