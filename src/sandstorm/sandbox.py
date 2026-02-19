@@ -372,6 +372,7 @@ async def run_agent_in_sandbox(
     keep_alive: bool = False,
     sandbox_id: str | None = None,
     sandbox_id_out: list[str] | None = None,
+    binary_files: dict[str, bytes] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Create an E2B sandbox, run the Claude Agent SDK query(), and yield messages."""
     queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
@@ -438,6 +439,14 @@ async def run_agent_in_sandbox(
         # Upload user files if provided
         if request.files:
             await _upload_files(sbx, request.files, request_id)
+        if binary_files:
+            logger.info("[%s] Uploading %d binary files", request_id, len(binary_files))
+            await sbx.files.write_files(
+                [
+                    {"path": f"/home/user/{path}", "data": data}
+                    for path, data in binary_files.items()
+                ]
+            )
 
         # Write new agent_config with the new prompt
         await sbx.files.write_files(
@@ -533,6 +542,14 @@ async def run_agent_in_sandbox(
             # Upload user files (batch write)
             if request.files:
                 await _upload_files(sbx, request.files, request_id)
+            if binary_files:
+                logger.info("[%s] Uploading %d binary files", request_id, len(binary_files))
+                await sbx.files.write_files(
+                    [
+                        {"path": f"/home/user/{path}", "data": data}
+                        for path, data in binary_files.items()
+                    ]
+                )
 
             # Batch-write all infrastructure files in a single API call
             if gcp_creds_content:

@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -131,10 +131,13 @@ class TestGatherThreadContext:
         result = _gather_thread_context(messages, "BBOT")
         assert "[U001] Hey, this CSV has duplicates" in result
         assert "[U002] <@BBOT> deduplicate this" in result
+        assert "[Sandstorm] Working on it..." in result
 
-    def test_excludes_bot_messages(self, messages):
+    def test_includes_bot_messages_with_prefix(self, messages):
         result = _gather_thread_context(messages, "BBOT")
-        assert "Working on it" not in result
+        assert "[Sandstorm] Working on it..." in result
+        # Bot messages should not use user ID prefix
+        assert "[BBOT]" not in result
 
     def test_includes_file_attachments(self, messages):
         result = _gather_thread_context(messages, "BBOT")
@@ -146,8 +149,27 @@ class TestGatherThreadContext:
 
 
 class TestDownloadThreadFiles:
-    def test_skips_binary_files(self):
+    def test_binary_files_returned_as_bytes(self):
+        """Binary files (images, PDFs) are downloaded as bytes in the second dict."""
         client = AsyncMock()
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.read = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n")
+
+        # session.get() returns a sync context manager wrapper (not a coroutine)
+        mock_get_ctx = AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_resp),
+            __aexit__=AsyncMock(),
+        )
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_get_ctx)
+
+        mock_session_ctx = AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_session),
+            __aexit__=AsyncMock(),
+        )
+
         messages = [
             {
                 "user": "U001",
@@ -162,8 +184,13 @@ class TestDownloadThreadFiles:
                 ],
             }
         ]
-        result = asyncio.run(_download_thread_files(client, messages, "BBOT"))
-        assert result == {}
+        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+            text_files, binary_files = asyncio.run(
+                _download_thread_files(client, messages, "BBOT")
+            )
+        assert text_files == {}
+        assert "photo.png" in binary_files
+        assert isinstance(binary_files["photo.png"], bytes)
 
     def test_skips_large_files(self):
         client = AsyncMock()
@@ -181,8 +208,9 @@ class TestDownloadThreadFiles:
                 ],
             }
         ]
-        result = asyncio.run(_download_thread_files(client, messages, "BBOT"))
-        assert result == {}
+        text_files, binary_files = asyncio.run(_download_thread_files(client, messages, "BBOT"))
+        assert text_files == {}
+        assert binary_files == {}
 
     def test_downloads_text_files_via_files_info(self):
         client = AsyncMock()
@@ -201,8 +229,9 @@ class TestDownloadThreadFiles:
                 ],
             }
         ]
-        result = asyncio.run(_download_thread_files(client, messages, "BBOT"))
-        assert result == {"script.py": "print('hello')"}
+        text_files, binary_files = asyncio.run(_download_thread_files(client, messages, "BBOT"))
+        assert text_files == {"script.py": "print('hello')"}
+        assert binary_files == {}
 
     def test_skips_bot_message_files(self):
         client = AsyncMock()
@@ -220,13 +249,15 @@ class TestDownloadThreadFiles:
                 ],
             }
         ]
-        result = asyncio.run(_download_thread_files(client, messages, "BBOT"))
-        assert result == {}
+        text_files, binary_files = asyncio.run(_download_thread_files(client, messages, "BBOT"))
+        assert text_files == {}
+        assert binary_files == {}
 
     def test_empty_messages(self):
         client = AsyncMock()
-        result = asyncio.run(_download_thread_files(client, [], "BBOT"))
-        assert result == {}
+        text_files, binary_files = asyncio.run(_download_thread_files(client, [], "BBOT"))
+        assert text_files == {}
+        assert binary_files == {}
 
 
 class TestStreamToSlack:
@@ -519,3 +550,32 @@ class TestStreamToSlackSandboxParams:
             )
 
         assert sandbox_id_out == ["sbx-new-456"]
+
+    def test_binary_files_passed_through(self, mock_streamer, tmp_path):
+        events = [json.dumps({"type": "result", "subtype": "end_turn", "num_turns": 1})]
+        captured_kwargs = {}
+
+        async def gen(request, request_id="", **kwargs):
+            captured_kwargs.update(kwargs)
+            for event in events:
+                yield event
+
+        request = _build_query_request("test")
+        binary = {"photo.png": b"\x89PNG\r\n"}
+        with (
+            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
+        ):
+            asyncio.run(
+                _stream_to_slack(
+                    request,
+                    "run1",
+                    mock_streamer,
+                    AsyncMock(),
+                    "C001",
+                    "1234.5678",
+                    binary_files=binary,
+                )
+            )
+
+        assert captured_kwargs["binary_files"] == {"photo.png": b"\x89PNG\r\n"}

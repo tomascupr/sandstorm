@@ -28,7 +28,7 @@ _MAX_FILE_SIZE = 10 * 1024 * 1024
 # Max sandbox pool entries (one per active thread)
 _MAX_SANDBOX_POOL = 1000
 
-# Binary MIME prefixes we skip when downloading thread files
+# MIME prefixes treated as binary (downloaded as bytes, not text)
 _BINARY_MIME_PREFIXES = ("image/", "audio/", "video/", "application/pdf", "application/zip")
 
 
@@ -130,20 +130,25 @@ async def _fetch_thread_messages(client, channel: str, thread_ts: str) -> list[d
 def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
     """Format thread messages into a context string.
 
-    Excludes bot's own messages. Includes file names/types.
+    Includes bot's own messages (prefixed [Sandstorm]) for conversational
+    continuity. Includes file names/types for user messages.
     Returns formatted string like:
       [Alice] Hey, this CSV has duplicate rows...
       [Alice] [attached: data.csv (text/csv, 15KB)]
       [Bob] @Sandstorm deduplicate this CSV...
+      [Sandstorm] Here's my analysis of the data...
     """
     lines: list[str] = []
     for msg in messages:
         user = msg.get("user", "unknown")
-        # Skip bot's own messages
-        if user == bot_user_id:
-            continue
-
         text = msg.get("text", "").strip()
+
+        # Include bot's own messages for conversational continuity
+        if user == bot_user_id:
+            if text:
+                lines.append(f"[Sandstorm] {text}")
+            continue  # skip file attachments from bot
+
         if text:
             lines.append(f"[{user}] {text}")
 
@@ -161,13 +166,18 @@ def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
 # ── File handling ─────────────────────────────────────────────────────────────
 
 
-async def _download_thread_files(client, messages: list[dict], bot_user_id: str) -> dict[str, str]:
-    """Download text files shared in the thread.
+async def _download_thread_files(
+    client, messages: list[dict], bot_user_id: str
+) -> tuple[dict[str, str], dict[str, bytes]]:
+    """Download files shared in the thread.
 
-    Returns {filename: content} dict suitable for QueryRequest.files.
-    Skips binary files (images, PDFs) and files > 10MB.
+    Returns (text_files, binary_files):
+      - text_files: {filename: str_content} for QueryRequest.files
+      - binary_files: {filename: bytes_content} for sandbox upload
+    Skips files > 10MB.
     """
-    files: dict[str, str] = {}
+    text_files: dict[str, str] = {}
+    binary_files: dict[str, bytes] = {}
     for msg in messages:
         if msg.get("user") == bot_user_id:
             continue
@@ -176,11 +186,7 @@ async def _download_thread_files(client, messages: list[dict], bot_user_id: str)
             name = f.get("name", "unknown")
             mimetype = f.get("mimetype", "")
             size = f.get("size", 0)
-
-            # Skip binary files
-            if any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES):
-                logger.info("Skipping binary file: %s (%s)", name, mimetype)
-                continue
+            is_binary = any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES)
 
             # Skip large files
             if size > _MAX_FILE_SIZE:
@@ -191,16 +197,18 @@ async def _download_thread_files(client, messages: list[dict], bot_user_id: str)
             if not url:
                 continue
 
-            try:
-                resp = await client.files_info(file=f["id"])
-                content_resp = resp.get("content")
-                if content_resp:
-                    files[name] = content_resp
-                    continue
-            except Exception:
-                pass
+            # Text files: try files_info API first (returns content directly)
+            if not is_binary:
+                try:
+                    resp = await client.files_info(file=f["id"])
+                    content_resp = resp.get("content")
+                    if content_resp:
+                        text_files[name] = content_resp
+                        continue
+                except Exception:
+                    pass
 
-            # Fallback: download via URL with bot token auth
+            # Download via URL with bot token auth
             try:
                 import aiohttp
 
@@ -210,8 +218,10 @@ async def _download_thread_files(client, messages: list[dict], bot_user_id: str)
                     session.get(url, headers=headers) as resp,
                 ):
                     if resp.status == 200:
-                        content = await resp.text()
-                        files[name] = content
+                        if is_binary:
+                            binary_files[name] = await resp.read()
+                        else:
+                            text_files[name] = await resp.text()
                     else:
                         logger.warning("Failed to download %s: HTTP %d", name, resp.status)
             except ImportError:
@@ -219,7 +229,7 @@ async def _download_thread_files(client, messages: list[dict], bot_user_id: str)
             except Exception:
                 logger.warning("Failed to download file: %s", name, exc_info=True)
 
-    return files
+    return text_files, binary_files
 
 
 # ── Event mapping / streaming bridge ──────────────────────────────────────────
@@ -237,6 +247,7 @@ async def _stream_to_slack(
     keep_alive: bool = False,
     sandbox_id: str | None = None,
     sandbox_id_out: list[str] | None = None,
+    binary_files: dict[str, bytes] | None = None,
 ) -> dict:
     """Core bridge: consume run_agent_in_sandbox() -> stream to Slack.
 
@@ -270,6 +281,7 @@ async def _stream_to_slack(
             keep_alive=keep_alive,
             sandbox_id=sandbox_id,
             sandbox_id_out=sandbox_id_out,
+            binary_files=binary_files,
         ):
             try:
                 event = json.loads(line)
@@ -410,13 +422,18 @@ def create_slack_app(
         run_id = uuid.uuid4().hex[:8]
         messages = await _fetch_thread_messages(client, channel, thread_ts)
         thread_context = _gather_thread_context(messages, bot_user_id)
-        files = await _download_thread_files(client, messages, bot_user_id)
+        text_files, binary_files = await _download_thread_files(client, messages, bot_user_id)
 
         full_prompt = prompt
         if thread_context:
             full_prompt = f"Thread context:\n{thread_context}\n\nUser request: {prompt}"
 
-        request = _build_query_request(full_prompt, files or None)
+        all_files = list(text_files.keys()) + list(binary_files.keys())
+        if all_files:
+            file_list = "\n".join(f"- /home/user/{f}" for f in all_files)
+            full_prompt += f"\n\nFiles available in your working directory:\n{file_list}"
+
+        request = _build_query_request(full_prompt, text_files or None)
 
         # Get or create sandbox pool entry for this thread
         key = (channel, thread_ts)
@@ -455,6 +472,7 @@ def create_slack_app(
                         thread_ts,
                         keep_alive=True,
                         sandbox_id=existing_sandbox_id,
+                        binary_files=binary_files or None,
                     )
                     reuse_succeeded = True
                 except (SandboxException, ConnectionError, OSError):
@@ -482,6 +500,7 @@ def create_slack_app(
                     thread_ts,
                     keep_alive=True,
                     sandbox_id_out=sandbox_id_out,
+                    binary_files=binary_files or None,
                 )
                 new_id = sandbox_id_out[0] if sandbox_id_out else None
                 _sandbox_pool[key] = (new_id, lock)
