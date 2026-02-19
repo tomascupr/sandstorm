@@ -174,12 +174,13 @@ class TestDownloadThreadFiles:
     def test_binary_files_returned_as_bytes(self):
         """Binary files (images, PDFs) are downloaded as bytes in the second dict."""
         client = AsyncMock()
+        client.token = "xoxb-test-token"
 
         mock_resp = AsyncMock()
         mock_resp.status = 200
         mock_resp.read = AsyncMock(return_value=b"\x89PNG\r\n\x1a\n")
 
-        # session.get() returns a sync context manager wrapper (not a coroutine)
+        # session.get() returns an async context manager
         mock_get_ctx = AsyncMock(
             __aenter__=AsyncMock(return_value=mock_resp),
             __aexit__=AsyncMock(),
@@ -187,6 +188,7 @@ class TestDownloadThreadFiles:
         mock_session = MagicMock()
         mock_session.get = MagicMock(return_value=mock_get_ctx)
 
+        # ClientSession() itself is an async context manager wrapping the loop
         mock_session_ctx = AsyncMock(
             __aenter__=AsyncMock(return_value=mock_session),
             __aexit__=AsyncMock(),

@@ -187,58 +187,59 @@ async def _download_thread_files(
       - binary_files: {filename: bytes_content} for sandbox upload
     Skips files > 10MB.
     """
+    try:
+        import aiohttp
+    except ImportError:
+        logger.warning("aiohttp not available for file downloads")
+        return {}, {}
+
     text_files: dict[str, str] = {}
     binary_files: dict[str, bytes] = {}
-    for msg in messages:
-        if msg.get("user") == bot_user_id:
-            continue
 
-        for f in msg.get("files", []):
-            name = f.get("name", "unknown")
-            mimetype = f.get("mimetype", "")
-            size = f.get("size", 0)
-            is_binary = any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES)
-
-            # Skip large files
-            if size > _MAX_FILE_SIZE:
-                logger.warning("Skipping large file: %s (%d bytes)", name, size)
+    headers = {"Authorization": f"Bearer {client.token}"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        for msg in messages:
+            if msg.get("user") == bot_user_id:
                 continue
 
-            url = f.get("url_private_download") or f.get("url_private")
-            if not url:
-                continue
+            for f in msg.get("files", []):
+                name = f.get("name", "unknown")
+                mimetype = f.get("mimetype", "")
+                size = f.get("size", 0)
+                is_binary = any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES)
 
-            # Text files: try files_info API first (returns content directly)
-            if not is_binary:
+                # Skip large files
+                if size > _MAX_FILE_SIZE:
+                    logger.warning("Skipping large file: %s (%d bytes)", name, size)
+                    continue
+
+                url = f.get("url_private_download") or f.get("url_private")
+                if not url:
+                    continue
+
+                # Text files: try files_info API first (returns content directly)
+                if not is_binary:
+                    try:
+                        resp = await client.files_info(file=f["id"])
+                        content_resp = resp.get("content")
+                        if content_resp:
+                            text_files[name] = content_resp
+                            continue
+                    except Exception:
+                        pass
+
+                # Download via URL with bot token auth
                 try:
-                    resp = await client.files_info(file=f["id"])
-                    content_resp = resp.get("content")
-                    if content_resp:
-                        text_files[name] = content_resp
-                        continue
-                except Exception:
-                    pass
-
-            # Download via URL with bot token auth
-            try:
-                import aiohttp
-
-                headers = {"Authorization": f"Bearer {client.token}"}
-                async with (
-                    aiohttp.ClientSession() as session,
-                    session.get(url, headers=headers) as resp,
-                ):
-                    if resp.status == 200:
-                        if is_binary:
-                            binary_files[name] = await resp.read()
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            if is_binary:
+                                binary_files[name] = await resp.read()
+                            else:
+                                text_files[name] = await resp.text()
                         else:
-                            text_files[name] = await resp.text()
-                    else:
-                        logger.warning("Failed to download %s: HTTP %d", name, resp.status)
-            except ImportError:
-                logger.warning("aiohttp not available for file download of %s", name)
-            except Exception:
-                logger.warning("Failed to download file: %s", name, exc_info=True)
+                            logger.warning("Failed to download %s: HTTP %d", name, resp.status)
+                except Exception:
+                    logger.warning("Failed to download file: %s", name, exc_info=True)
 
     return text_files, binary_files
 
