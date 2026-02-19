@@ -28,6 +28,11 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27"]
+slack = [
+    "slack-bolt>=1.21.0",
+    "slack-sdk>=3.34.0",
+    "aiohttp>=3.9.0",
+]
 telemetry = [
     "opentelemetry-api>=1.30.0",
     "opentelemetry-sdk>=1.30.0",
@@ -42,7 +47,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sandstorm"]
-artifacts = ["src/sandstorm/runner.mjs"]
+artifacts = ["src/sandstorm/runner.mjs", "src/sandstorm/slack-manifest.yaml"]
 
 [project.scripts]
 duvo-sandstorm = "sandstorm.cli:cli"

@@ -1,0 +1,644 @@
+"""Slack bot integration for Sandstorm — run agents via @mentions and DMs."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import logging
+import os
+import re
+import time
+import uuid
+from collections import OrderedDict
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+from .models import QueryRequest
+from .sandbox import run_agent_in_sandbox
+from .store import run_store
+
+if TYPE_CHECKING:
+    from slack_bolt.async_app import AsyncApp
+
+logger = logging.getLogger(__name__)
+
+# Max file size to download from Slack threads (10 MB)
+_MAX_FILE_SIZE = 10 * 1024 * 1024
+
+# Max number of active threads to track for auto-response
+_MAX_ACTIVE_THREADS = 1000
+
+# Binary MIME prefixes we skip when downloading thread files
+_BINARY_MIME_PREFIXES = ("image/", "audio/", "video/", "application/pdf", "application/zip")
+
+
+# ── Metadata blocks ──────────────────────────────────────────────────────────
+
+
+def _build_metadata_blocks(
+    run_id: str,
+    model: str | None,
+    cost_usd: float | None,
+    num_turns: int | None,
+    duration_secs: float | None,
+) -> list[dict]:
+    """Block Kit footer: context line (model|turns|cost|duration) + feedback buttons."""
+    parts = []
+    if model:
+        parts.append(f"Model: {model}")
+    if num_turns is not None:
+        parts.append(f"Turns: {num_turns}")
+    if cost_usd is not None:
+        parts.append(f"Cost: ${cost_usd:.4f}")
+    if duration_secs is not None:
+        parts.append(f"Duration: {duration_secs:.1f}s")
+
+    blocks: list[dict] = []
+    if parts:
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [{"type": "mrkdwn", "text": " | ".join(parts)}],
+            }
+        )
+    blocks.append(
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "\U0001f44d Helpful"},
+                    "action_id": "sandstorm_feedback_positive",
+                    "value": run_id,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "\U0001f44e Not helpful"},
+                    "action_id": "sandstorm_feedback_negative",
+                    "value": run_id,
+                },
+            ],
+        }
+    )
+    return blocks
+
+
+# ── Query builder ─────────────────────────────────────────────────────────────
+
+
+def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> QueryRequest:
+    """Build QueryRequest from prompt + env var defaults.
+
+    Uses SANDSTORM_SLACK_MODEL, SANDSTORM_SLACK_TIMEOUT env vars.
+    API keys resolved by QueryRequest.resolve_api_keys() as usual.
+    """
+    model = os.environ.get("SANDSTORM_SLACK_MODEL")
+    timeout_str = os.environ.get("SANDSTORM_SLACK_TIMEOUT", "300")
+    try:
+        timeout = int(timeout_str)
+    except ValueError:
+        timeout = 300
+
+    return QueryRequest(
+        prompt=prompt,
+        model=model,
+        timeout=timeout,
+        files=files,
+        anthropic_api_key=None,
+        e2b_api_key=None,
+        openrouter_api_key=None,
+        max_turns=None,
+    )
+
+
+# ── Thread helpers ────────────────────────────────────────────────────────────
+
+
+async def _fetch_thread_messages(client, channel: str, thread_ts: str) -> list[dict]:
+    """Fetch all messages in a thread via conversations_replies().
+
+    Returns the raw messages list, or [] on error.
+    """
+    try:
+        result = await client.conversations_replies(channel=channel, ts=thread_ts, limit=50)
+        return result.get("messages", [])
+    except Exception:
+        logger.warning("Failed to fetch thread replies", exc_info=True)
+        return []
+
+
+def _gather_thread_context(messages: list[dict], bot_user_id: str) -> str:
+    """Format thread messages into a context string.
+
+    Excludes bot's own messages. Includes file names/types.
+    Returns formatted string like:
+      [Alice] Hey, this CSV has duplicate rows...
+      [Alice] [attached: data.csv (text/csv, 15KB)]
+      [Bob] @Sandstorm deduplicate this CSV...
+    """
+    lines: list[str] = []
+    for msg in messages:
+        user = msg.get("user", "unknown")
+        # Skip bot's own messages
+        if user == bot_user_id:
+            continue
+
+        text = msg.get("text", "").strip()
+        if text:
+            lines.append(f"[{user}] {text}")
+
+        # Note attached files
+        for f in msg.get("files", []):
+            name = f.get("name", "unknown")
+            mimetype = f.get("mimetype", "unknown")
+            size = f.get("size", 0)
+            size_kb = size / 1024
+            lines.append(f"[{user}] [attached: {name} ({mimetype}, {size_kb:.0f}KB)]")
+
+    return "\n".join(lines)
+
+
+# ── File handling ─────────────────────────────────────────────────────────────
+
+
+async def _download_thread_files(client, messages: list[dict], bot_user_id: str) -> dict[str, str]:
+    """Download text files shared in the thread.
+
+    Returns {filename: content} dict suitable for QueryRequest.files.
+    Skips binary files (images, PDFs) and files > 10MB.
+    """
+    files: dict[str, str] = {}
+    for msg in messages:
+        if msg.get("user") == bot_user_id:
+            continue
+
+        for f in msg.get("files", []):
+            name = f.get("name", "unknown")
+            mimetype = f.get("mimetype", "")
+            size = f.get("size", 0)
+
+            # Skip binary files
+            if any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES):
+                logger.info("Skipping binary file: %s (%s)", name, mimetype)
+                continue
+
+            # Skip large files
+            if size > _MAX_FILE_SIZE:
+                logger.warning("Skipping large file: %s (%d bytes)", name, size)
+                continue
+
+            url = f.get("url_private_download") or f.get("url_private")
+            if not url:
+                continue
+
+            try:
+                resp = await client.files_info(file=f["id"])
+                content_resp = resp.get("content")
+                if content_resp:
+                    files[name] = content_resp
+                    continue
+            except Exception:
+                pass
+
+            # Fallback: download via URL with bot token auth
+            try:
+                import aiohttp
+
+                headers = {"Authorization": f"Bearer {client.token}"}
+                async with (
+                    aiohttp.ClientSession() as session,
+                    session.get(url, headers=headers) as resp,
+                ):
+                    if resp.status == 200:
+                        content = await resp.text()
+                        files[name] = content
+                    else:
+                        logger.warning("Failed to download %s: HTTP %d", name, resp.status)
+            except ImportError:
+                logger.warning("aiohttp not available for file download of %s", name)
+            except Exception:
+                logger.warning("Failed to download file: %s", name, exc_info=True)
+
+    return files
+
+
+# ── Event mapping / streaming bridge ──────────────────────────────────────────
+
+
+async def _stream_to_slack(
+    request: QueryRequest,
+    run_id: str,
+    streamer,
+    client,
+    channel: str,
+    thread_ts: str,
+    set_status: Callable | None = None,
+) -> dict:
+    """Core bridge: consume run_agent_in_sandbox() -> stream to Slack.
+
+    Args:
+        streamer: Chat stream object from client.chat_stream()
+        set_status: Optional async callable (only in Assistant context).
+        Returns metadata dict {model, cost_usd, num_turns, duration_secs, error}.
+    """
+    metadata: dict = {
+        "model": None,
+        "cost_usd": None,
+        "num_turns": None,
+        "duration_secs": None,
+        "error": None,
+    }
+
+    start = time.monotonic()
+    stopped = False
+
+    run_store.create(
+        id=run_id,
+        prompt=request.prompt,
+        model=request.model,
+        files_count=len(request.files) if request.files else 0,
+    )
+
+    try:
+        async for line in run_agent_in_sandbox(request, run_id):
+            try:
+                event = json.loads(line)
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+            event_type = event.get("type")
+            logger.info("[%s] Event: %s", run_id, event_type)
+
+            if event_type == "system" and event.get("subtype") == "init":
+                model = event.get("model")
+                metadata["model"] = model
+                if set_status:
+                    await set_status(f"Running agent on {model}...")
+
+            elif event_type == "assistant":
+                message = event.get("message", {})
+                for block in message.get("content", []):
+                    if block.get("type") == "text":
+                        text = block["text"]
+                        if text:
+                            try:
+                                await streamer.append(markdown_text=text)
+                                logger.info("[%s] Streamed %d chars", run_id, len(text))
+                            except Exception:
+                                logger.error("[%s] streamer.append failed", run_id, exc_info=True)
+                    elif block.get("type") == "tool_use":
+                        tool_name = block.get("name", "unknown")
+                        logger.info("[%s] Tool: %s", run_id, tool_name)
+                        if set_status:
+                            await set_status(f"Using {tool_name}...")
+
+            elif event_type == "result":
+                cost = event.get("total_cost_usd")
+                metadata["cost_usd"] = cost if cost is not None else event.get("cost_usd")
+                metadata["num_turns"] = event.get("num_turns")
+                metadata["duration_secs"] = round(time.monotonic() - start, 1)
+                metadata["model"] = event.get("model") or metadata["model"]
+                logger.info(
+                    "[%s] Result: turns=%s cost=%s",
+                    run_id,
+                    metadata["num_turns"],
+                    metadata["cost_usd"],
+                )
+
+                footer_blocks = _build_metadata_blocks(
+                    run_id,
+                    metadata["model"],
+                    metadata["cost_usd"],
+                    metadata["num_turns"],
+                    metadata["duration_secs"],
+                )
+                try:
+                    await streamer.stop(blocks=footer_blocks)
+                    stopped = True
+                    logger.info("[%s] Stream stopped with footer", run_id)
+                except Exception:
+                    logger.error("[%s] streamer.stop failed", run_id, exc_info=True)
+
+                run_store.complete(
+                    run_id,
+                    cost_usd=metadata["cost_usd"],
+                    num_turns=metadata["num_turns"],
+                    duration_secs=metadata["duration_secs"],
+                    model=metadata["model"],
+                )
+
+            elif event_type == "error":
+                error_msg = event.get("error", "Unknown error")
+                metadata["error"] = error_msg
+                metadata["duration_secs"] = round(time.monotonic() - start, 1)
+                logger.error("[%s] Agent error: %s", run_id, error_msg)
+
+                try:
+                    await streamer.append(markdown_text=f"\n:warning: Error: {error_msg}")
+                    await streamer.stop()
+                    stopped = True
+                except Exception:
+                    logger.error("[%s] streamer.stop (error) failed", run_id, exc_info=True)
+
+                run_store.fail(run_id, error_msg, metadata["duration_secs"])
+
+            # Skip user, stderr, warning events (log server-side only)
+            elif event_type in ("user", "stderr", "warning"):
+                logger.debug("[%s] %s", run_id, event_type)
+
+    except Exception as exc:
+        metadata["error"] = str(exc)
+        metadata["duration_secs"] = round(time.monotonic() - start, 1)
+        logger.error("[%s] Stream error: %s", run_id, exc, exc_info=True)
+        run_store.fail(run_id, str(exc), metadata["duration_secs"])
+    finally:
+        # Always stop the streamer to avoid dangling streams in Slack
+        if not stopped:
+            with contextlib.suppress(Exception):
+                await streamer.stop()
+
+    return metadata
+
+
+# ── App factory ───────────────────────────────────────────────────────────────
+
+
+def create_slack_app(
+    *, bot_token: str | None = None, signing_secret: str | None = None
+) -> AsyncApp:
+    """Create and configure the Slack Bolt AsyncApp."""
+    from slack_bolt.async_app import AsyncApp
+    from slack_bolt.middleware.assistant.async_assistant import AsyncAssistant
+
+    token = bot_token or os.environ.get("SLACK_BOT_TOKEN")
+    app = AsyncApp(token=token, signing_secret=signing_secret)
+
+    # Threads where the bot has responded — follow-ups auto-trigger without @mention
+    # Bounded to prevent unbounded memory growth; oldest entries evicted first
+    _active_threads: OrderedDict[tuple[str, str], float] = OrderedDict()
+
+    # ── 1. @mention handler — primary interaction in channels ──
+
+    @app.event("app_mention")
+    async def handle_mention(event, client, say, context):
+        channel = event["channel"]
+        thread_ts = event.get("thread_ts", event["ts"])
+        user_id = event["user"]
+        bot_user_id = context["bot_user_id"]
+
+        # Extract prompt (strip @mention)
+        raw_text = event.get("text", "")
+        prompt = re.sub(r"<@[A-Z0-9]+>", "", raw_text).strip()
+        if not prompt:
+            await say(text="Mention me with a task!", thread_ts=thread_ts)
+            return
+
+        # Add :eyes: reaction as status indicator (set_status not available here)
+        with contextlib.suppress(Exception):
+            await client.reactions_add(channel=channel, timestamp=event["ts"], name="eyes")
+
+        run_id = uuid.uuid4().hex[:8]
+        messages = await _fetch_thread_messages(client, channel, thread_ts)
+        thread_context = _gather_thread_context(messages, bot_user_id)
+        files = await _download_thread_files(client, messages, bot_user_id)
+
+        full_prompt = prompt
+        if thread_context:
+            full_prompt = f"Thread context:\n{thread_context}\n\nUser request: {prompt}"
+
+        request = _build_query_request(full_prompt, files or None)
+
+        # Create async streamer (recipient IDs required for channel streaming)
+        streamer = await client.chat_stream(
+            channel=channel,
+            thread_ts=thread_ts,
+            recipient_team_id=context.get("team_id"),
+            recipient_user_id=user_id,
+        )
+
+        # No set_status in app_mention context — pass None
+        await _stream_to_slack(request, run_id, streamer, client, channel, thread_ts)
+
+        # Track this thread so follow-up messages auto-trigger the bot
+        _active_threads[(channel, thread_ts)] = time.monotonic()
+        while len(_active_threads) > _MAX_ACTIVE_THREADS:
+            _active_threads.popitem(last=False)
+
+        # Remove :eyes: reaction on completion
+        with contextlib.suppress(Exception):
+            await client.reactions_remove(channel=channel, timestamp=event["ts"], name="eyes")
+
+    # ── 1b. Thread continuation — auto-respond in active threads ──
+
+    @app.event("message")
+    async def handle_thread_message(event, client, say, context):
+        # Only handle thread replies (thread_ts set and differs from ts)
+        thread_ts = event.get("thread_ts")
+        ts = event.get("ts")
+        if not thread_ts or thread_ts == ts:
+            return
+
+        channel = event.get("channel", "")
+
+        # Only handle threads we've previously responded in
+        if (channel, thread_ts) not in _active_threads:
+            return
+
+        bot_user_id = context.get("bot_user_id", "")
+
+        # Skip bot's own messages
+        if event.get("bot_id") or event.get("user") == bot_user_id:
+            return
+
+        # Skip messages that @mention the bot — handled by handle_mention
+        raw_text = event.get("text", "")
+        if f"<@{bot_user_id}>" in raw_text:
+            return
+
+        prompt = raw_text.strip()
+        if not prompt:
+            return
+
+        user_id = event.get("user", "unknown")
+
+        with contextlib.suppress(Exception):
+            await client.reactions_add(channel=channel, timestamp=ts, name="eyes")
+
+        run_id = uuid.uuid4().hex[:8]
+        messages = await _fetch_thread_messages(client, channel, thread_ts)
+        thread_context = _gather_thread_context(messages, bot_user_id)
+        files = await _download_thread_files(client, messages, bot_user_id)
+
+        full_prompt = prompt
+        if thread_context:
+            full_prompt = f"Thread context:\n{thread_context}\n\nUser request: {prompt}"
+
+        request = _build_query_request(full_prompt, files or None)
+
+        streamer = await client.chat_stream(
+            channel=channel,
+            thread_ts=thread_ts,
+            recipient_team_id=context.get("team_id"),
+            recipient_user_id=user_id,
+        )
+
+        await _stream_to_slack(request, run_id, streamer, client, channel, thread_ts)
+
+        with contextlib.suppress(Exception):
+            await client.reactions_remove(channel=channel, timestamp=ts, name="eyes")
+
+    # ── 2. Assistant DM handler — conversational thread experience ──
+
+    assistant = AsyncAssistant()
+
+    @assistant.thread_started
+    async def handle_thread_started(say, set_suggested_prompts):
+        await say("Hi! I'm Sandstorm — I run code in secure sandboxes. What can I build for you?")
+        await set_suggested_prompts(
+            prompts=[
+                {
+                    "title": "Write and run code",
+                    "message": "Create a Python script that...",
+                },
+                {
+                    "title": "Analyze a file",
+                    "message": "Analyze the attached file...",
+                },
+                {
+                    "title": "Build something",
+                    "message": "Build a REST API with...",
+                },
+            ]
+        )
+
+    @assistant.user_message
+    async def handle_user_message(payload, client, say, set_status, context):
+        channel_id = context.channel_id
+        thread_ts = context.thread_ts
+        user_id = payload.get("user", "unknown")
+        prompt = payload.get("text", "")
+        if not prompt.strip():
+            await say("Please provide a prompt.")
+            return
+
+        await set_status("Spinning up sandbox...")
+        run_id = uuid.uuid4().hex[:8]
+
+        request = _build_query_request(prompt)
+        streamer = await client.chat_stream(
+            channel=channel_id,
+            thread_ts=thread_ts,
+            recipient_team_id=context.get("team_id"),
+            recipient_user_id=user_id,
+        )
+
+        # set_status IS available in Assistant context
+        await _stream_to_slack(
+            request, run_id, streamer, client, channel_id, thread_ts, set_status=set_status
+        )
+
+    app.use(assistant)
+
+    # ── 3. Feedback action handlers ──
+
+    @app.action("sandstorm_feedback_positive")
+    async def handle_positive(ack, body, client):
+        await ack()
+        run_id = body["actions"][0]["value"]
+        user = body["user"]["id"]
+        run_store.set_feedback(run_id, "positive", user)
+
+        # Replace buttons with confirmation
+        message = body.get("message", {})
+        channel = body["channel"]["id"]
+        ts = message.get("ts")
+        blocks = message.get("blocks", [])
+        # Remove actions block, add confirmation context
+        updated_blocks = [b for b in blocks if b.get("type") != "actions"]
+        updated_blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {"type": "mrkdwn", "text": f"\U0001f44d <@{user}> found this helpful"}
+                ],
+            }
+        )
+        if ts:
+            await client.chat_update(channel=channel, ts=ts, blocks=updated_blocks)
+
+    @app.action("sandstorm_feedback_negative")
+    async def handle_negative(ack, body, client):
+        await ack()
+        run_id = body["actions"][0]["value"]
+        user = body["user"]["id"]
+        run_store.set_feedback(run_id, "negative", user)
+
+        message = body.get("message", {})
+        channel = body["channel"]["id"]
+        ts = message.get("ts")
+        blocks = message.get("blocks", [])
+        updated_blocks = [b for b in blocks if b.get("type") != "actions"]
+        updated_blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"\U0001f44e <@{user}> found this not helpful",
+                    }
+                ],
+            }
+        )
+        if ts:
+            await client.chat_update(channel=channel, ts=ts, blocks=updated_blocks)
+
+    return app
+
+
+# ── CLI entrypoints ───────────────────────────────────────────────────────────
+
+
+def run_socket_mode(bot_token: str | None = None, app_token: str | None = None) -> None:
+    """Start bot in Socket Mode (dev — no public URL needed)."""
+    from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+
+    app = create_slack_app(bot_token=bot_token)
+    app_token = app_token or os.environ.get("SLACK_APP_TOKEN")
+    if not app_token:
+        raise RuntimeError(
+            "SLACK_APP_TOKEN is required for Socket Mode — set it in .env or pass via --app-token"
+        )
+
+    logger.info("Starting Sandstorm Slack bot in Socket Mode...")
+
+    async def _start():
+        handler = AsyncSocketModeHandler(app, app_token)
+        await handler.start_async()
+
+    asyncio.run(_start())
+
+
+def run_http_mode(
+    bot_token: str | None = None,
+    signing_secret: str | None = None,
+    host: str = "0.0.0.0",
+    port: int = 3000,
+) -> None:
+    """Start bot in HTTP mode (production)."""
+    import uvicorn
+    from slack_bolt.adapter.starlette.async_handler import AsyncSlackRequestHandler
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+    from starlette.routing import Route
+
+    secret = signing_secret or os.environ.get("SLACK_SIGNING_SECRET")
+    app = create_slack_app(bot_token=bot_token, signing_secret=secret)
+    app_handler = AsyncSlackRequestHandler(app)
+
+    async def endpoint(req: Request):
+        return await app_handler.handle(req)
+
+    starlette_app = Starlette(routes=[Route("/slack/events", endpoint=endpoint, methods=["POST"])])
+    logger.info("Starting Sandstorm Slack bot in HTTP mode on %s:%d", host, port)
+    uvicorn.run(starlette_app, host=host, port=port)

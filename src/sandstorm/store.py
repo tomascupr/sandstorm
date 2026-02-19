@@ -20,6 +20,8 @@ class Run:
     duration_secs: float | None = None
     error: str | None = None
     files_count: int = 0
+    feedback: str | None = None
+    feedback_user: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -88,6 +90,15 @@ class RunStore:
         run.duration_secs = duration_secs
         self._append_to_file(run)
 
+    def set_feedback(self, id: str, feedback: str, user: str) -> None:
+        run = self._index.get(id)
+        if run is None:
+            logger.warning("RunStore.set_feedback: unknown run id=%s", id)
+            return
+        run.feedback = feedback
+        run.feedback_user = user
+        self._append_to_file(run)
+
     def list(self, limit: int = 50) -> list[dict]:
         runs = list(self._runs)
         runs.reverse()  # newest first
@@ -114,6 +125,21 @@ class RunStore:
                         data = json.loads(line)
                         run = Run(**data)
                         if run.id in self._index:
+                            # Last-write-wins: update existing entry with latest state
+                            existing = self._index[run.id]
+                            for field in (
+                                "status",
+                                "cost_usd",
+                                "num_turns",
+                                "duration_secs",
+                                "error",
+                                "model",
+                                "feedback",
+                                "feedback_user",
+                            ):
+                                val = getattr(run, field)
+                                if val is not None:
+                                    setattr(existing, field, val)
                             continue
                         self._runs.append(run)
                         self._index[run.id] = run
