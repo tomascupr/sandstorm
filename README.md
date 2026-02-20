@@ -1,4 +1,4 @@
-# Sandstorm
+# Duvo.ai Sandstorm
 
 Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
