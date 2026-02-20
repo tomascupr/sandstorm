@@ -473,7 +473,11 @@ def create_slack_app(
     from slack_bolt.middleware.assistant.async_assistant import AsyncAssistant
 
     token = bot_token or os.environ.get("SLACK_BOT_TOKEN")
-    app = AsyncApp(token=token, signing_secret=signing_secret, process_before_response=process_before_response)
+    app = AsyncApp(
+        token=token,
+        signing_secret=signing_secret,
+        process_before_response=process_before_response,
+    )
 
     # Sandbox reuse pool: (channel, thread_ts) -> (sandbox_id, lock)
     # Lock serializes concurrent @mentions in the same thread
