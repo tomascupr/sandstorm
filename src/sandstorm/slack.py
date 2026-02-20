@@ -463,14 +463,17 @@ async def _stream_to_slack(
 
 
 def create_slack_app(
-    *, bot_token: str | None = None, signing_secret: str | None = None
+    *,
+    bot_token: str | None = None,
+    signing_secret: str | None = None,
+    process_before_response: bool = False,
 ) -> AsyncApp:
     """Create and configure the Slack Bolt AsyncApp."""
     from slack_bolt.async_app import AsyncApp
     from slack_bolt.middleware.assistant.async_assistant import AsyncAssistant
 
     token = bot_token or os.environ.get("SLACK_BOT_TOKEN")
-    app = AsyncApp(token=token, signing_secret=signing_secret)
+    app = AsyncApp(token=token, signing_secret=signing_secret, process_before_response=process_before_response)
 
     # Sandbox reuse pool: (channel, thread_ts) -> (sandbox_id, lock)
     # Lock serializes concurrent @mentions in the same thread
