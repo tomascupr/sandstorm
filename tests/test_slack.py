@@ -16,6 +16,7 @@ from sandstorm.slack import (  # noqa: E402
     _gather_thread_context,
     _resolve_user_names,
     _stream_to_slack,
+    _unique_filename,
 )
 from sandstorm.store import RunStore  # noqa: E402
 
@@ -284,6 +285,111 @@ class TestDownloadThreadFiles:
         text_files, binary_files = asyncio.run(_download_thread_files(client, [], "BBOT"))
         assert text_files == {}
         assert binary_files == {}
+
+    def test_xlsx_downloaded_as_binary(self):
+        """Excel files (application/vnd.openxmlformats-*) are treated as binary."""
+        client = AsyncMock()
+        client.token = "xoxb-test-token"
+
+        xlsx_bytes = b"PK\x03\x04fake-xlsx-content"
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.read = AsyncMock(return_value=xlsx_bytes)
+
+        mock_get_ctx = AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_resp),
+            __aexit__=AsyncMock(),
+        )
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_get_ctx)
+
+        mock_session_ctx = AsyncMock(
+            __aenter__=AsyncMock(return_value=mock_session),
+            __aexit__=AsyncMock(),
+        )
+
+        messages = [
+            {
+                "user": "U001",
+                "files": [
+                    {
+                        "id": "F001",
+                        "name": "report.xlsx",
+                        "mimetype": (
+                            "application/vnd.openxmlformats-"
+                            "officedocument.spreadsheetml.sheet"
+                        ),
+                        "size": 5000,
+                        "url_private": "https://example.com/report.xlsx",
+                    }
+                ],
+            }
+        ]
+        with patch("aiohttp.ClientSession", return_value=mock_session_ctx):
+            text_files, binary_files = asyncio.run(
+                _download_thread_files(client, messages, "BBOT")
+            )
+        assert text_files == {}
+        assert "report.xlsx" in binary_files
+        assert binary_files["report.xlsx"] == xlsx_bytes
+
+    def test_duplicate_filenames_get_unique_suffixes(self):
+        """Two files named data.csv should produce data.csv and data_1.csv."""
+        client = AsyncMock()
+        client.files_info = AsyncMock(
+            side_effect=[
+                {"content": "a,b\n1,2"},
+                {"content": "a,b\n3,4"},
+            ]
+        )
+        messages = [
+            {
+                "user": "U001",
+                "files": [
+                    {
+                        "id": "F001",
+                        "name": "data.csv",
+                        "mimetype": "text/csv",
+                        "size": 100,
+                        "url_private": "https://example.com/data1.csv",
+                    },
+                    {
+                        "id": "F002",
+                        "name": "data.csv",
+                        "mimetype": "text/csv",
+                        "size": 100,
+                        "url_private": "https://example.com/data2.csv",
+                    },
+                ],
+            }
+        ]
+        text_files, binary_files = asyncio.run(_download_thread_files(client, messages, "BBOT"))
+        assert "data.csv" in text_files
+        assert "data_1.csv" in text_files
+        assert text_files["data.csv"] == "a,b\n1,2"
+        assert text_files["data_1.csv"] == "a,b\n3,4"
+
+
+class TestUniqueFilename:
+    def test_first_use_unchanged(self):
+        seen: set[str] = set()
+        assert _unique_filename("file.txt", seen) == "file.txt"
+
+    def test_duplicate_gets_suffix(self):
+        seen: set[str] = set()
+        _unique_filename("file.txt", seen)
+        assert _unique_filename("file.txt", seen) == "file_1.txt"
+
+    def test_triple_duplicate(self):
+        seen: set[str] = set()
+        _unique_filename("file.txt", seen)
+        _unique_filename("file.txt", seen)
+        assert _unique_filename("file.txt", seen) == "file_2.txt"
+
+    def test_no_extension(self):
+        seen: set[str] = set()
+        _unique_filename("README", seen)
+        assert _unique_filename("README", seen) == "README_1"
 
 
 class TestStreamToSlack:
@@ -691,6 +797,23 @@ class TestResolveUserNames:
         result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
         assert "BBOT" not in result
         assert "U001" in result
+
+    def test_resolves_multiple_users_concurrently(self):
+        """All users_info calls are made (verifies gather fans out)."""
+        client = AsyncMock()
+
+        async def _users_info(user):
+            return {"user": {"profile": {"display_name": f"Name-{user}"}}}
+
+        client.users_info = AsyncMock(side_effect=_users_info)
+        messages = [
+            {"user": "U001", "text": "hi"},
+            {"user": "U002", "text": "hello"},
+            {"user": "U003", "text": "hey"},
+        ]
+        result = asyncio.run(_resolve_user_names(client, messages, "BBOT"))
+        assert result == {"U001": "Name-U001", "U002": "Name-U002", "U003": "Name-U003"}
+        assert client.users_info.call_count == 3
 
 
 class TestGatherThreadContextWithNames:

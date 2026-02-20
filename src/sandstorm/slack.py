@@ -29,7 +29,21 @@ _MAX_FILE_SIZE = 10 * 1024 * 1024
 _MAX_SANDBOX_POOL = 1000
 
 # MIME prefixes treated as binary (downloaded as bytes, not text)
-_BINARY_MIME_PREFIXES = ("image/", "audio/", "video/", "application/pdf", "application/zip")
+_BINARY_MIME_PREFIXES = (
+    "image/",
+    "audio/",
+    "video/",
+    "application/pdf",
+    "application/zip",
+    "application/vnd.openxmlformats-",  # .xlsx, .docx, .pptx
+    "application/vnd.ms-",  # legacy .xls, .doc, .ppt
+    "application/msword",  # legacy .doc alternative
+    "application/x-7z-compressed",
+    "application/x-rar-compressed",
+    "application/x-tar",
+    "application/gzip",
+    "application/octet-stream",  # generic binary fallback
+)
 
 
 # ── Metadata blocks ──────────────────────────────────────────────────────────
@@ -143,22 +157,25 @@ async def _resolve_user_names(client, messages: list[dict], bot_user_id: str) ->
     """Resolve Slack user IDs to display names.
 
     Returns {uid: display_name} mapping. Falls back to uid on API error.
+    Uses asyncio.gather() to resolve all users concurrently.
     """
     uids = {
         msg.get("user", "")
         for msg in messages
         if msg.get("user") and msg.get("user") != bot_user_id
     }
-    names: dict[str, str] = {}
-    for uid in uids:
+
+    async def _resolve(uid: str) -> tuple[str, str]:
         try:
             resp = await client.users_info(user=uid)
             profile = resp.get("user", {}).get("profile", {})
-            names[uid] = profile.get("display_name") or profile.get("real_name") or uid
+            return uid, profile.get("display_name") or profile.get("real_name") or uid
         except Exception:
             logger.warning("Failed to resolve user name for %s", uid)
-            names[uid] = uid
-    return names
+            return uid, uid
+
+    results = await asyncio.gather(*(_resolve(uid) for uid in uids))
+    return dict(results)
 
 
 def _gather_thread_context(
@@ -204,6 +221,22 @@ def _gather_thread_context(
 # ── File handling ─────────────────────────────────────────────────────────────
 
 
+def _unique_filename(name: str, seen: set[str]) -> str:
+    """Return a unique filename, appending _1, _2, etc. for duplicates."""
+    if name not in seen:
+        seen.add(name)
+        return name
+    stem, dot, ext = name.rpartition(".")
+    if not dot:
+        stem, ext = name, ""
+    for i in range(1, 100):
+        candidate = f"{stem}_{i}.{ext}" if ext else f"{stem}_{i}"
+        if candidate not in seen:
+            seen.add(candidate)
+            return candidate
+    return name  # fallback
+
+
 async def _download_thread_files(
     client, messages: list[dict], bot_user_id: str
 ) -> tuple[dict[str, str], dict[str, bytes]]:
@@ -222,6 +255,7 @@ async def _download_thread_files(
 
     text_files: dict[str, str] = {}
     binary_files: dict[str, bytes] = {}
+    seen: set[str] = set()
 
     headers = {"Authorization": f"Bearer {client.token}"}
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -230,7 +264,8 @@ async def _download_thread_files(
                 continue
 
             for f in msg.get("files", []):
-                name = f.get("name", "unknown")
+                raw_name = f.get("name", "unknown")
+                name = _unique_filename(raw_name, seen)
                 mimetype = f.get("mimetype", "")
                 size = f.get("size", 0)
                 is_binary = any(mimetype.startswith(prefix) for prefix in _BINARY_MIME_PREFIXES)
