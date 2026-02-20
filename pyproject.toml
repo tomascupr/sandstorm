@@ -13,6 +13,9 @@ dependencies = [
     "pydantic>=2.10.0",
     "python-dotenv>=1.0.0",
     "click>=8.0.0",
+    "slack-bolt>=1.21.0",
+    "slack-sdk>=3.34.0",
+    "aiohttp>=3.9.0",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -28,11 +31,6 @@ classifiers = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "httpx>=0.27"]
-slack = [
-    "slack-bolt>=1.21.0",
-    "slack-sdk>=3.34.0",
-    "aiohttp>=3.9.0",
-]
 telemetry = [
     "opentelemetry-api>=1.30.0",
     "opentelemetry-sdk>=1.30.0",
