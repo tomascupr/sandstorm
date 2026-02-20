@@ -1,6 +1,6 @@
 [project]
 name = "duvo-sandstorm"
-version = "0.7.0"
+version = "0.7.1"
 description = "Run Claude agents in secure cloud sandboxes — via API, CLI, or Slack. One call. Full agent. Zero infrastructure."
 readme = "README.md"
 license = "MIT"

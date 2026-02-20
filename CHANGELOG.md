@@ -2,11 +2,33 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.7.1] - 2026-02-20
+
+### Bug Fixes
+
+- use pull_request_target for claude review on fork PRs (#34)
+
+### Documentation
+
+- update API reference for per-request whitelisting (#33)
+
+### Features
+
+- add per-request whitelisting and extra definitions for /query (#27)
+
+### Refactoring
+
+- Slack bot improvements (#35)
+
 ## [0.7.0] - 2026-02-19
 
 ### Features
 
 - add Slack bot integration (#31)
+
+### Miscellaneous
+
+- release v0.7.0 (#32)
 
 ## [0.6.0] - 2026-02-18
 
