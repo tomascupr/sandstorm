@@ -152,6 +152,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount Slack events endpoint (only if slack-bolt is installed)
+try:
+    from .slack_routes import router as slack_router
+
+    app.include_router(slack_router)
+except Exception:
+    pass
+
 
 _DASHBOARD_HTML = (Path(__file__).parent / "dashboard.html").read_text()
 
