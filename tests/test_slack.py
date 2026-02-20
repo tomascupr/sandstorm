@@ -316,8 +316,7 @@ class TestDownloadThreadFiles:
                         "id": "F001",
                         "name": "report.xlsx",
                         "mimetype": (
-                            "application/vnd.openxmlformats-"
-                            "officedocument.spreadsheetml.sheet"
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         ),
                         "size": 5000,
                         "url_private": "https://example.com/report.xlsx",
