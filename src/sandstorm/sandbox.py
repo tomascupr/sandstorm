@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -35,6 +36,9 @@ SDK_VERSION = "0.2.42"
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
 _RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
+_MAX_EXTRACT_FILES = 10  # Max files to extract from sandbox after agent run
+_MAX_EXTRACT_FILE_SIZE = 25 * 1024 * 1024  # 25 MB per file (Slack upload limit)
+_MAX_EXTRACT_TOTAL_SIZE = 50 * 1024 * 1024  # 50 MB total extraction budget
 _SKILL_NAME_PATTERN = NAME_PATTERN
 
 # Load the runner script that executes inside the sandbox
@@ -364,6 +368,85 @@ def _to_str(data) -> str:
     return data if isinstance(data, str) else str(data)
 
 
+async def _extract_generated_files(
+    sbx: AsyncSandbox,
+    input_file_names: set[str],
+    request_id: str,
+) -> list[str]:
+    """Extract new files created by the agent in /home/user/.
+
+    Lists the working directory, filters out input files / dotfiles / directories,
+    reads each new file as bytes, and returns a list of JSON-encoded file events.
+    """
+    entries = await sbx.files.list("/home/user/")
+
+    candidates = []
+    for entry in entries:
+        # Skip directories (entry.type is Optional[FileType])
+        if entry.type is None or entry.type.value != "file":
+            continue
+        # Skip dotfiles
+        if entry.name.startswith("."):
+            continue
+        # Skip files that were uploaded as input
+        if entry.name in input_file_names:
+            continue
+        # Skip known large files early (before downloading)
+        if entry.size > _MAX_EXTRACT_FILE_SIZE:
+            logger.info(
+                "[%s] Skipping oversized file: %s (%d bytes)",
+                request_id,
+                entry.name,
+                entry.size,
+            )
+            continue
+        candidates.append(entry)
+
+    if not candidates:
+        logger.debug("[%s] No new files to extract", request_id)
+        return []
+
+    if len(candidates) > _MAX_EXTRACT_FILES:
+        logger.info(
+            "[%s] Capping file extraction at %d (found %d)",
+            request_id,
+            _MAX_EXTRACT_FILES,
+            len(candidates),
+        )
+        candidates = candidates[:_MAX_EXTRACT_FILES]
+
+    events: list[str] = []
+    total_size = 0
+    for entry in candidates:
+        try:
+            data = await sbx.files.read(entry.path, format="bytes")
+            raw = data if isinstance(data, bytes) else bytes(data)
+            size = len(raw)
+
+            if total_size + size > _MAX_EXTRACT_TOTAL_SIZE:
+                logger.info("[%s] Total extraction size limit reached", request_id)
+                break
+
+            total_size += size
+            encoded = base64.b64encode(raw).decode("ascii")
+            events.append(
+                json.dumps(
+                    {
+                        "type": "file",
+                        "name": entry.name,
+                        "path": entry.path,
+                        "size": size,
+                        "data": encoded,
+                    }
+                )
+            )
+            logger.info("[%s] Extracted file: %s (%d bytes)", request_id, entry.name, size)
+        except Exception:
+            logger.warning("[%s] Failed to read %s", request_id, entry.name, exc_info=True)
+
+    return events
+
+
 def _build_agent_config(
     request: QueryRequest,
     sandstorm_config: dict,
@@ -496,6 +579,13 @@ async def run_agent_in_sandbox(
 
     agent_config, merged_skills = _build_agent_config(request, sandstorm_config, disk_skills)
     has_skills = agent_config["has_skills"]
+
+    # Track input file names to exclude from file extraction later
+    input_file_names: set[str] = set()
+    if request.files:
+        input_file_names.update(request.files.keys())
+    if binary_files:
+        input_file_names.update(binary_files.keys())
 
     if sandbox_id:
         # --- Reconnect path: reuse an existing sandbox ---
@@ -673,6 +763,14 @@ async def run_agent_in_sandbox(
                 time.monotonic() - agent_start,
                 model=agent_config.get("model"),
             )
+
+        # Extract files created by the agent (sandbox still alive)
+        try:
+            generated = await _extract_generated_files(sbx, input_file_names, request_id)
+            for file_event in generated:
+                yield file_event
+        except Exception:
+            logger.warning("[%s] File extraction failed", request_id, exc_info=True)
 
     finally:
         sandbox_stopped()
