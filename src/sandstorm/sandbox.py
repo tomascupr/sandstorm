@@ -76,6 +76,8 @@ _PROVIDER_ENV_KEYS = [
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    # MCP server credentials
+    "LINEAR_API_KEY",
 ]
 
 
@@ -510,12 +512,23 @@ def _build_agent_config(
     ):
         allowed_tools = [*allowed_tools, "Skill"]
 
+    # Build system prompt, then apply env-var append if set
+    sys_prompt = sandstorm_config.get("system_prompt")
+    env_append = os.environ.get("SANDSTORM_SYSTEM_PROMPT_APPEND")
+    if env_append and sys_prompt:
+        if isinstance(sys_prompt, dict) and "append" in sys_prompt:
+            sys_prompt = {**sys_prompt, "append": sys_prompt["append"] + "\n\n" + env_append}
+        elif isinstance(sys_prompt, str):
+            sys_prompt = sys_prompt + "\n\n" + env_append
+    elif env_append and not sys_prompt:
+        sys_prompt = env_append
+
     agent_config = {
         "prompt": request.prompt,
         "cwd": "/home/user",
         "model": request.model or sandstorm_config.get("model"),
         "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
-        "system_prompt": sandstorm_config.get("system_prompt"),
+        "system_prompt": sys_prompt,
         "output_format": (
             request.output_format
             if request.output_format is not None
