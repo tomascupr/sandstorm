@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextlib
 import json
 import logging
@@ -22,8 +23,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Max file size to download from Slack threads (10 MB)
-_MAX_FILE_SIZE = 10 * 1024 * 1024
+# Max file size to download from Slack threads (50 MB)
+_MAX_FILE_SIZE = 50 * 1024 * 1024
 
 # Max sandbox pool entries (one per active thread)
 _MAX_SANDBOX_POOL = 1000
@@ -106,7 +107,7 @@ def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> Qu
     Uses SANDSTORM_SLACK_MODEL, SANDSTORM_SLACK_TIMEOUT env vars.
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
-    model = os.environ.get("SANDSTORM_SLACK_MODEL", "claude-sonnet-4-6")
+    model = os.environ.get("SANDSTORM_SLACK_MODEL", "claude-opus-4-6")
     timeout_str = os.environ.get("SANDSTORM_SLACK_TIMEOUT", "300")
     try:
         timeout = int(timeout_str)
@@ -440,6 +441,33 @@ async def _stream_to_slack(
                     logger.error("[%s] streamer.stop (error) failed", run_id, exc_info=True)
 
                 run_store.fail(run_id, error_msg, metadata["duration_secs"])
+
+            elif event_type == "file":
+                file_name = event.get("name", "file")
+                file_data_b64 = event.get("data")
+                if file_data_b64:
+                    try:
+                        file_data = base64.b64decode(file_data_b64)
+                        await client.files_upload_v2(
+                            channel=channel,
+                            thread_ts=thread_ts,
+                            content=file_data,
+                            filename=file_name,
+                            title=file_name,
+                        )
+                        logger.info(
+                            "[%s] Uploaded file %s (%d bytes)",
+                            run_id,
+                            file_name,
+                            len(file_data),
+                        )
+                    except Exception:
+                        logger.error(
+                            "[%s] Failed to upload %s to Slack",
+                            run_id,
+                            file_name,
+                            exc_info=True,
+                        )
 
             # Skip user, stderr, warning events (log server-side only)
             elif event_type in ("user", "stderr", "warning"):

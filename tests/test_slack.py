@@ -69,7 +69,7 @@ class TestBuildQueryRequest:
         request = _build_query_request("hello world")
         assert request.prompt == "hello world"
         assert request.timeout == 300
-        assert request.model == "claude-sonnet-4-6"
+        assert request.model == "claude-opus-4-6"
         assert request.output_format == {}
 
     def test_uses_sandstorm_slack_model_env(self, monkeypatch):
@@ -229,7 +229,7 @@ class TestDownloadThreadFiles:
                         "id": "F001",
                         "name": "huge.txt",
                         "mimetype": "text/plain",
-                        "size": 20 * 1024 * 1024,  # 20MB
+                        "size": 60 * 1024 * 1024,  # 60MB
                         "url_private": "https://example.com/huge.txt",
                     }
                 ],
