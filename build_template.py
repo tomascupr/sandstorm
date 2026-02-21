@@ -23,7 +23,9 @@ TEMPLATE_ALIAS = "sandstorm"
 template = (
     Template()
     .from_node_image("24")
-    .apt_install(["curl", "git", "ripgrep", "python3", "python3-pip"])
+    .apt_install(["curl", "git", "ripgrep", "python3", "python3-pip", "poppler-utils", "qpdf"])
+    # Pre-install Python packages for document processing skills (pdf, docx, pptx)
+    .run_cmd("pip3 install pypdf pdfplumber reportlab markitdown", user="root")
     # Install Agent SDK locally so ESM imports resolve correctly
     .run_cmd(
         "mkdir -p /opt/agent-runner"
