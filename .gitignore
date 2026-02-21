@@ -16,3 +16,6 @@ gcp-*.json
 
 # Run history
 .sandstorm/
+
+# Private deployment configs (not open-sourced)
+rohlik/
