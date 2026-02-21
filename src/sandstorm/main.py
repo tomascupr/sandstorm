@@ -13,12 +13,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from e2b import AuthenticationException, SandboxException
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
+from .auth import load_api_keys, verify_api_token
 from .models import QueryRequest
 from .sandbox import load_sandstorm_config, run_agent_in_sandbox
 from .store import run_store
@@ -126,6 +127,11 @@ def _auto_deregister_webhook(webhook_id: str | None) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     telemetry.init(app)
+    try:
+        load_api_keys()
+    except ValueError as e:
+        logger.critical("Authentication validation failed: %s", e)
+        raise
     if not _WEBHOOK_SECRET:
         logger.warning(
             "SANDSTORM_WEBHOOK_SECRET not set — webhook signature verification disabled"
@@ -237,7 +243,7 @@ async def e2b_webhook(request: Request):
         " including system, assistant, result, and error events."
     ),
 )
-async def query(request: QueryRequest):
+async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
     req_id = uuid.uuid4().hex[:8]
     logger.info(
         "[%s] Query received: prompt=%s model=%s",
