@@ -306,6 +306,34 @@ ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4  # or any model ID
 
 For model remapping, per-request keys, and compatibility details, see the [full OpenRouter guide](docs/openrouter.md).
 
+## Authentication
+
+Sandstorm supports optional Bearer token authentication on the `/query` endpoint. When `SANDSTORM_API_KEY` is set, all requests to `/query` must include a valid `Authorization: Bearer <token>` header. When not set, the endpoint is open (suitable for local development).
+
+```bash
+# Enable authentication
+export SANDSTORM_API_KEY="your-secret-token-at-least-32-characters-long"
+
+# Requests must include the token
+curl -N -X POST https://your-sandstorm-host/query \
+  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "Hello world"}'
+```
+
+**Key rotation** is supported via `SANDSTORM_API_KEY_PREVIOUS` -- both the current and previous keys are accepted during the transition period:
+
+```bash
+export SANDSTORM_API_KEY="new-key-at-least-32-characters-long"
+export SANDSTORM_API_KEY_PREVIOUS="old-key-at-least-32-characters-long"
+```
+
+Notes:
+- Keys must be at least 32 characters long (server refuses to start otherwise)
+- The `/health` endpoint is always accessible without authentication
+- Token comparison uses `secrets.compare_digest` (timing-safe)
+- Failed attempts log the client IP and a token prefix (first 8 chars) for diagnostics
+
 ## Configuration
 
 Sandstorm uses a two-layer config system:
@@ -341,12 +369,14 @@ Keys can live in `.env` (set once) or be passed per-request (multi-tenant). Requ
 ANTHROPIC_API_KEY=sk-ant-...
 E2B_API_KEY=e2b_...
 
-# Then just send prompts:
+# Then just send prompts (add -H "Authorization: Bearer ..." if SANDSTORM_API_KEY is set):
 curl -N -X POST https://your-sandstorm-host/query \
+  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
   -d '{"prompt": "Crawl docs.stripe.com/api and generate an OpenAPI spec as YAML"}'
 
 # Or override per-request:
 curl -N -X POST https://your-sandstorm-host/query \
+  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
   -d '{"prompt": "...", "anthropic_api_key": "sk-ant-other", "e2b_api_key": "e2b_other"}'
 ```
 
@@ -527,6 +557,7 @@ The repo includes `vercel.json` and `api/index.py` pre-configured. Set `ANTHROPI
 
 ## Security
 
+- **API token authentication** -- optional Bearer token auth on `/query` with timing-safe comparison, key rotation, and failed-attempt logging
 - **Isolated execution** -- every request gets a fresh VM sandbox, destroyed after
 - **No server secrets** -- keys via `.env` or per-request, never stored server-side
 - **No shell injection** -- prompts and config written as files, never interpolated into commands
