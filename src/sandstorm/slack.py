@@ -246,7 +246,7 @@ async def _download_thread_files(
     Returns (text_files, binary_files):
       - text_files: {filename: str_content} for QueryRequest.files
       - binary_files: {filename: bytes_content} for sandbox upload
-    Skips files > 10MB.
+    Skips files > 50MB.
     """
     try:
         import aiohttp

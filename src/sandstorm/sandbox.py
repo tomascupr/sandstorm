@@ -38,6 +38,8 @@ _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
 _RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
 _MAX_EXTRACT_FILES = 10  # Max files to extract from sandbox after agent run
 _MAX_EXTRACT_FILE_SIZE = 25 * 1024 * 1024  # 25 MB per file (Slack upload limit)
+# Note: Vercel serverless has a 4.5 MB response limit — base64-encoded files
+# larger than ~3 MB will exceed this. Self-hosted and Slack deployments are unaffected.
 _MAX_EXTRACT_TOTAL_SIZE = 50 * 1024 * 1024  # 50 MB total extraction budget
 _SKILL_NAME_PATTERN = NAME_PATTERN
 

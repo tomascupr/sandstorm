@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -17,8 +18,9 @@ router = APIRouter(tags=["Slack"])
 _seen_events: dict[str, float] = {}
 _DEDUP_TTL = 60  # seconds
 
-# Lazy singleton
+# Lazy singleton with async lock to prevent duplicate initialization
 _handler = None
+_handler_lock = asyncio.Lock()
 
 
 async def _get_handler():
@@ -27,13 +29,17 @@ async def _get_handler():
     if _handler is not None:
         return _handler
 
-    from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
+    async with _handler_lock:
+        if _handler is not None:
+            return _handler
 
-    from .slack import create_slack_app
+        from slack_bolt.adapter.fastapi.async_handler import AsyncSlackRequestHandler
 
-    slack_app = create_slack_app(process_before_response=True)
-    _handler = AsyncSlackRequestHandler(slack_app)
-    return _handler
+        from .slack import create_slack_app
+
+        slack_app = create_slack_app(process_before_response=True)
+        _handler = AsyncSlackRequestHandler(slack_app)
+        return _handler
 
 
 @router.post("/slack/events")
