@@ -25,7 +25,7 @@ template = (
     .from_node_image("24")
     .apt_install(["curl", "git", "ripgrep", "python3", "python3-pip", "poppler-utils", "qpdf"])
     # Pre-install Python packages for document processing skills (pdf, docx, pptx)
-    .run_cmd("pip3 install pypdf pdfplumber reportlab markitdown", user="root")
+    .run_cmd("pip3 install pypdf==6.7.2 pdfplumber==0.11.9 reportlab==4.4.10 markitdown==0.1.5", user="root")
     # Install Agent SDK locally so ESM imports resolve correctly
     .run_cmd(
         "mkdir -p /opt/agent-runner"
