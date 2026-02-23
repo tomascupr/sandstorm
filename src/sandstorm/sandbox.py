@@ -88,6 +88,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
     # Expected field types: field_name -> (allowed types tuple, human description)
     known_fields: dict[str, tuple[tuple[type, ...], str]] = {
         "system_prompt": ((str, dict), "str or dict"),
+        "system_prompt_append": ((str,), "str"),
         "model": ((str,), "str"),
         "max_turns": ((int,), "int"),
         "output_format": ((dict,), "dict"),
@@ -96,6 +97,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "skills_dir": ((str,), "str"),
         "allowed_tools": ((list,), "list"),
         "webhook_url": ((str,), "str"),
+        "timeout": ((int,), "int"),
         "template_skills": ((bool,), "bool"),
     }
 
@@ -514,9 +516,9 @@ def _build_agent_config(
     ):
         allowed_tools = [*allowed_tools, "Skill"]
 
-    # Build system prompt, then apply env-var append if set
+    # Build system prompt, then apply append from config if set
     sys_prompt = sandstorm_config.get("system_prompt")
-    env_append = os.environ.get("SANDSTORM_SYSTEM_PROMPT_APPEND")
+    env_append = sandstorm_config.get("system_prompt_append")
     if env_append and sys_prompt:
         if isinstance(sys_prompt, dict) and "append" in sys_prompt:
             sys_prompt = {**sys_prompt, "append": sys_prompt["append"] + "\n\n" + env_append}
@@ -526,6 +528,8 @@ def _build_agent_config(
             sys_prompt = sys_prompt + "\n\n" + env_append
     elif env_append and not sys_prompt:
         sys_prompt = env_append
+
+    timeout = request.timeout or sandstorm_config.get("timeout") or 300
 
     agent_config = {
         "prompt": request.prompt,
@@ -543,6 +547,7 @@ def _build_agent_config(
         "mcp_servers": mcp_servers,
         "has_skills": has_skills,
         "allowed_tools": allowed_tools,
+        "timeout": timeout,
     }
 
     return agent_config, merged_skills
@@ -596,6 +601,7 @@ async def run_agent_in_sandbox(
 
     agent_config, merged_skills = _build_agent_config(request, sandstorm_config, disk_skills)
     has_skills = agent_config["has_skills"]
+    timeout = agent_config["timeout"]
 
     # Track input file names to exclude from file extraction later
     input_file_names: set[str] = set()
@@ -608,7 +614,7 @@ async def run_agent_in_sandbox(
         # --- Reconnect path: reuse an existing sandbox ---
         logger.info("[%s] Reconnecting to sandbox %s", request_id, sandbox_id)
         sbx = await AsyncSandbox.connect(sandbox_id, api_key=request.e2b_api_key)
-        await sbx.set_timeout(request.timeout)
+        await sbx.set_timeout(timeout)
         sandbox_started()
 
         # Upload extra skills that aren't already in the sandbox
@@ -663,7 +669,7 @@ async def run_agent_in_sandbox(
         if gcp_creds_content:
             sandbox_envs["GOOGLE_APPLICATION_CREDENTIALS"] = _GCP_CREDENTIALS_SANDBOX_PATH
 
-        sbx = await _create_sandbox(request.e2b_api_key, request.timeout, sandbox_envs, request_id)
+        sbx = await _create_sandbox(request.e2b_api_key, timeout, sandbox_envs, request_id)
         if sandbox_id_out is not None:
             sandbox_id_out.append(sbx.sandbox_id)
 
@@ -805,7 +811,7 @@ async def run_agent_in_sandbox(
                 "[%s] Keeping sandbox %s alive (timeout=%ds)",
                 request_id,
                 sbx.sandbox_id,
-                request.timeout,
+                timeout,
             )
         else:
             await _cleanup(task, sbx, request_id)

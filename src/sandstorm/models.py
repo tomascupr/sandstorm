@@ -55,8 +55,11 @@ class QueryRequest(BaseModel):
         description="Output format override. Overrides sandstorm.json. "
         'Example: {"type": "json_schema", "schema": {...}}.',
     )
-    timeout: int = Field(
-        default=300, ge=5, le=3600, description="Sandbox timeout in seconds (5-3600)."
+    timeout: int | None = Field(
+        default=None,
+        ge=5,
+        le=3600,
+        description="Sandbox timeout in seconds (5-3600). None = use sandstorm.json or 300.",
     )
     files: dict[str, str] | None = Field(
         None,

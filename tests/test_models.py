@@ -150,7 +150,7 @@ class TestWhitelistFields:
 class TestTimeoutBounds:
     def test_default_timeout(self):
         req = QueryRequest(prompt="test")
-        assert req.timeout == 300
+        assert req.timeout is None
 
     def test_timeout_too_low(self):
         with pytest.raises(ValidationError, match="timeout"):

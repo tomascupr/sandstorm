@@ -102,22 +102,14 @@ def _build_metadata_blocks(
 
 
 def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> QueryRequest:
-    """Build QueryRequest from prompt + env var defaults.
+    """Build QueryRequest from prompt, deferring model/timeout to sandstorm.json.
 
-    Uses SANDSTORM_SLACK_MODEL, SANDSTORM_SLACK_TIMEOUT env vars.
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
-    model = os.environ.get("SANDSTORM_SLACK_MODEL", "claude-opus-4-6")
-    timeout_str = os.environ.get("SANDSTORM_SLACK_TIMEOUT", "300")
-    try:
-        timeout = int(timeout_str)
-    except ValueError:
-        timeout = 300
-
     return QueryRequest(
         prompt=prompt,
-        model=model,
-        timeout=timeout,
+        model=None,
+        timeout=None,
         files=files,
         output_format={},  # Slack is conversational — skip structured output
         anthropic_api_key=None,

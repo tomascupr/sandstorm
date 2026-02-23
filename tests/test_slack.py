@@ -68,24 +68,9 @@ class TestBuildQueryRequest:
     def test_uses_env_defaults(self):
         request = _build_query_request("hello world")
         assert request.prompt == "hello world"
-        assert request.timeout == 300
-        assert request.model == "claude-opus-4-6"
+        assert request.timeout is None
+        assert request.model is None
         assert request.output_format == {}
-
-    def test_uses_sandstorm_slack_model_env(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SLACK_MODEL", "opus")
-        request = _build_query_request("test")
-        assert request.model == "opus"
-
-    def test_uses_sandstorm_slack_timeout_env(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SLACK_TIMEOUT", "600")
-        request = _build_query_request("test")
-        assert request.timeout == 600
-
-    def test_invalid_timeout_falls_back_to_300(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SLACK_TIMEOUT", "not-a-number")
-        request = _build_query_request("test")
-        assert request.timeout == 300
 
     def test_attaches_files(self):
         files = {"data.csv": "a,b\n1,2"}

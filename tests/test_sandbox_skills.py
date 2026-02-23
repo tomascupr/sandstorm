@@ -427,6 +427,21 @@ class TestBuildAgentConfigAllowedTools:
 
 
 @pytest.mark.usefixtures("_api_keys")
+class TestTimeoutResolution:
+    def test_request_timeout_overrides_config(self):
+        config, _ = _build_agent_config(_req(timeout=600), {"timeout": 120}, {})
+        assert config["timeout"] == 600
+
+    def test_config_timeout_used_when_request_is_none(self):
+        config, _ = _build_agent_config(_req(), {"timeout": 120}, {})
+        assert config["timeout"] == 120
+
+    def test_falls_back_to_300_when_neither_set(self):
+        config, _ = _build_agent_config(_req(), {}, {})
+        assert config["timeout"] == 300
+
+
+@pytest.mark.usefixtures("_api_keys")
 class TestBuildAgentConfigOutputFormat:
     _FMT_A = {"type": "json_schema", "schema": {"type": "object"}}
     _FMT_B = {"type": "json_schema", "schema": {"type": "array"}}
@@ -458,31 +473,30 @@ class TestBuildAgentConfigOutputFormat:
 
 @pytest.mark.usefixtures("_api_keys")
 class TestBuildAgentConfigSystemPromptAppend:
-    def test_env_append_with_string_system_prompt(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "extra instructions")
-        cfg = {"system_prompt": "You are helpful"}
+    def test_append_with_string_system_prompt(self):
+        cfg = {"system_prompt": "You are helpful", "system_prompt_append": "extra instructions"}
         config, _ = _build_agent_config(_req(), cfg, {})
         assert config["system_prompt"] == "You are helpful\n\nextra instructions"
 
-    def test_env_append_with_dict_append_system_prompt(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "extra")
-        cfg = {"system_prompt": {"prepend": "pre", "append": "existing"}}
+    def test_append_with_dict_append_system_prompt(self):
+        cfg = {
+            "system_prompt": {"prepend": "pre", "append": "existing"},
+            "system_prompt_append": "extra",
+        }
         config, _ = _build_agent_config(_req(), cfg, {})
         assert config["system_prompt"] == {"prepend": "pre", "append": "existing\n\nextra"}
 
-    def test_env_append_with_dict_prepend_only(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "added")
-        cfg = {"system_prompt": {"prepend": "You are X"}}
+    def test_append_with_dict_prepend_only(self):
+        cfg = {"system_prompt": {"prepend": "You are X"}, "system_prompt_append": "added"}
         config, _ = _build_agent_config(_req(), cfg, {})
         assert config["system_prompt"] == {"prepend": "You are X", "append": "added"}
 
-    def test_env_append_without_system_prompt(self, monkeypatch):
-        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "standalone")
-        config, _ = _build_agent_config(_req(), {}, {})
+    def test_append_without_system_prompt(self):
+        cfg = {"system_prompt_append": "standalone"}
+        config, _ = _build_agent_config(_req(), cfg, {})
         assert config["system_prompt"] == "standalone"
 
-    def test_no_env_append(self, monkeypatch):
-        monkeypatch.delenv("SANDSTORM_SYSTEM_PROMPT_APPEND", raising=False)
+    def test_no_append(self):
         cfg = {"system_prompt": "unchanged"}
         config, _ = _build_agent_config(_req(), cfg, {})
         assert config["system_prompt"] == "unchanged"
