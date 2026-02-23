@@ -1,5 +1,6 @@
+from unittest.mock import AsyncMock, patch
+
 import pytest
-from unittest.mock import patch, AsyncMock
 
 
 class TestStartupValidation:
@@ -19,7 +20,7 @@ class TestStartupValidation:
         valid_key = "test-token-12345678901234567890abcdef"
         monkeypatch.setenv("SANDSTORM_API_KEY", valid_key)
 
-        from sandstorm.auth import load_api_keys, is_auth_enabled
+        from sandstorm.auth import is_auth_enabled, load_api_keys
 
         load_api_keys()
         assert is_auth_enabled()
@@ -28,7 +29,7 @@ class TestStartupValidation:
         """When SANDSTORM_API_KEY is not set, auth is disabled."""
         monkeypatch.delenv("SANDSTORM_API_KEY", raising=False)
 
-        from sandstorm.auth import load_api_keys, is_auth_enabled
+        from sandstorm.auth import is_auth_enabled, load_api_keys
 
         load_api_keys()
         assert not is_auth_enabled()

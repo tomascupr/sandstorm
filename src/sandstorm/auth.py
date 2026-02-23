@@ -1,6 +1,7 @@
 import logging
 import os
 import secrets
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -45,14 +46,15 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 async def verify_api_token(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
 ) -> str | None:
     """Dependency for FastAPI routes - validates Bearer token if auth is enabled."""
     if not _auth_enabled:
         return None
 
     if not credentials:
-        logging.warning("Missing authentication from IP: %s", request.client.host)
+        client_host = request.client.host if request.client else "unknown"
+        logging.warning("Missing authentication from IP: %s", client_host)
         raise HTTPException(
             status_code=401,
             detail="Not authenticated",
@@ -63,9 +65,10 @@ async def verify_api_token(
 
     if not is_valid:
         token_prefix = credentials.credentials[:8] if len(credentials.credentials) >= 8 else "***"
+        client_host = request.client.host if request.client else "unknown"
         logging.warning(
             "Invalid token attempt from IP: %s (token prefix: %s...)",
-            request.client.host,
+            client_host,
             token_prefix,
         )
         raise HTTPException(
