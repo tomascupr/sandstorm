@@ -79,6 +79,7 @@ Sandstorm: [sees prior context, modifies the existing code]
 - **File uploads** — share text files (code, CSV, JSON, logs) and binary files (images, PDFs, audio, video, zip) in the thread; the agent gets them in its sandbox. 10 MB limit per file
 - **Sandbox reuse per thread** — follow-up @mentions in the same thread reuse the sandbox, so the agent has access to files and state from previous turns
 - **Thread context** — full conversation history (including bot responses and file attachment metadata) is passed to the agent for multi-turn conversations
+- **File extraction** — files created by the agent in the sandbox are automatically extracted and uploaded to the Slack thread (up to 10 files, 25 MB per file, 50 MB total)
 - **Feedback buttons** — each response gets thumbs up/down buttons; feedback is recorded in the run store
 - **Metadata footer** — every response shows model, turns, cost, and duration
 
@@ -91,8 +92,6 @@ Sandstorm: [sees prior context, modifies the existing code]
 | `SLACK_BOT_TOKEN` | Yes | -- | Bot user OAuth token (`xoxb-...`) |
 | `SLACK_APP_TOKEN` | Yes (Socket Mode) | -- | App-level token (`xapp-...`) for Socket Mode |
 | `SLACK_SIGNING_SECRET` | Yes (HTTP mode) | -- | Signing secret for request verification in HTTP mode |
-| `SANDSTORM_SLACK_MODEL` | No | from config | Override the model for Slack responses |
-| `SANDSTORM_SLACK_TIMEOUT` | No | `300` | Sandbox timeout in seconds |
 | `ANTHROPIC_API_KEY` | Yes* | -- | Anthropic API key (or use OpenRouter) |
 | `E2B_API_KEY` | Yes | -- | E2B sandbox API key |
 | `OPENROUTER_API_KEY` | No | -- | OpenRouter key (if using OpenRouter) |

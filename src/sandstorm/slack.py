@@ -583,6 +583,11 @@ def create_slack_app(
                     )
 
             if not reuse_succeeded:
+                if existing_sandbox_id:
+                    # Fresh run_id for the retry — the failed reuse attempt
+                    # already recorded its own run entry and Slack message.
+                    run_id = uuid.uuid4().hex[:8]
+
                 streamer = await client.chat_stream(
                     channel=channel,
                     thread_ts=thread_ts,
