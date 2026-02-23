@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Slack"])
 
-# Dedup cache: event_id -> timestamp
+# Dedup cache: event_id -> timestamp (in-memory only; does not persist across
+# serverless cold starts — the X-Slack-Retry-Num header check is the primary guard)
 _seen_events: dict[str, float] = {}
 _DEDUP_TTL = 60  # seconds
 

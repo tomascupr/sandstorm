@@ -1,7 +1,20 @@
+import asyncio
+import base64
+import json
+from unittest.mock import AsyncMock, MagicMock, PropertyMock
+
 import pytest
 
 from sandstorm.models import QueryRequest
-from sandstorm.sandbox import _build_agent_config, _load_skills_dir, _validate_sandstorm_config
+from sandstorm.sandbox import (
+    _MAX_EXTRACT_FILE_SIZE,
+    _MAX_EXTRACT_FILES,
+    _MAX_EXTRACT_TOTAL_SIZE,
+    _build_agent_config,
+    _extract_generated_files,
+    _load_skills_dir,
+    _validate_sandstorm_config,
+)
 
 
 class TestValidateSandstormConfigSkills:
@@ -441,3 +454,132 @@ class TestBuildAgentConfigOutputFormat:
         cfg = {"output_format": self._FMT_A}
         config, _ = _build_agent_config(_req(output_format={}), cfg, {})
         assert config["output_format"] is None
+
+
+@pytest.mark.usefixtures("_api_keys")
+class TestBuildAgentConfigSystemPromptAppend:
+    def test_env_append_with_string_system_prompt(self, monkeypatch):
+        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "extra instructions")
+        cfg = {"system_prompt": "You are helpful"}
+        config, _ = _build_agent_config(_req(), cfg, {})
+        assert config["system_prompt"] == "You are helpful\n\nextra instructions"
+
+    def test_env_append_with_dict_append_system_prompt(self, monkeypatch):
+        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "extra")
+        cfg = {"system_prompt": {"prepend": "pre", "append": "existing"}}
+        config, _ = _build_agent_config(_req(), cfg, {})
+        assert config["system_prompt"] == {"prepend": "pre", "append": "existing\n\nextra"}
+
+    def test_env_append_with_dict_prepend_only(self, monkeypatch):
+        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "added")
+        cfg = {"system_prompt": {"prepend": "You are X"}}
+        config, _ = _build_agent_config(_req(), cfg, {})
+        assert config["system_prompt"] == {"prepend": "You are X", "append": "added"}
+
+    def test_env_append_without_system_prompt(self, monkeypatch):
+        monkeypatch.setenv("SANDSTORM_SYSTEM_PROMPT_APPEND", "standalone")
+        config, _ = _build_agent_config(_req(), {}, {})
+        assert config["system_prompt"] == "standalone"
+
+    def test_no_env_append(self, monkeypatch):
+        monkeypatch.delenv("SANDSTORM_SYSTEM_PROMPT_APPEND", raising=False)
+        cfg = {"system_prompt": "unchanged"}
+        config, _ = _build_agent_config(_req(), cfg, {})
+        assert config["system_prompt"] == "unchanged"
+
+
+# ---------------------------------------------------------------------------
+# _extract_generated_files tests
+# ---------------------------------------------------------------------------
+
+
+def _make_entry(name, *, type_val="file", size=100, path=None):
+    """Create a mock sandbox file entry."""
+    entry = MagicMock()
+    entry.name = name
+    entry.path = path or f"/home/user/{name}"
+    entry.size = size
+    type_mock = MagicMock()
+    type_mock.value = type_val
+    type(entry).type = PropertyMock(return_value=type_mock if type_val else None)
+    return entry
+
+
+class TestExtractGeneratedFiles:
+    def _sbx(self):
+        sbx = AsyncMock()
+        sbx.files.list = AsyncMock(return_value=[])
+        sbx.files.read = AsyncMock(return_value=b"data")
+        return sbx
+
+    def test_skips_directories(self):
+        sbx = self._sbx()
+        sbx.files.list.return_value = [_make_entry("mydir", type_val="directory")]
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert result == []
+
+    def test_skips_dotfiles(self):
+        sbx = self._sbx()
+        sbx.files.list.return_value = [_make_entry(".bashrc")]
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert result == []
+
+    def test_skips_input_files(self):
+        sbx = self._sbx()
+        sbx.files.list.return_value = [_make_entry("input.csv")]
+        result = asyncio.run(_extract_generated_files(sbx, {"input.csv"}, "req1"))
+        assert result == []
+
+    def test_skips_oversized_files(self):
+        sbx = self._sbx()
+        sbx.files.list.return_value = [_make_entry("huge.bin", size=_MAX_EXTRACT_FILE_SIZE + 1)]
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert result == []
+
+    def test_caps_at_max_files(self):
+        sbx = self._sbx()
+        entries = [_make_entry(f"file{i}.txt", size=10) for i in range(15)]
+        sbx.files.list.return_value = entries
+        sbx.files.read.return_value = b"x"
+
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert len(result) == _MAX_EXTRACT_FILES
+
+    def test_total_size_budget(self):
+        sbx = self._sbx()
+        # Each file is half the total budget + 1 byte, so only 1 fits
+        half_plus = _MAX_EXTRACT_TOTAL_SIZE // 2 + 1
+        entries = [_make_entry("a.bin", size=100), _make_entry("b.bin", size=100)]
+        sbx.files.list.return_value = entries
+        sbx.files.read.return_value = b"x" * half_plus
+
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert len(result) == 1
+
+    def test_returns_json_encoded_file_events(self):
+        sbx = self._sbx()
+        raw = b"hello world"
+        sbx.files.list.return_value = [_make_entry("output.txt", size=len(raw))]
+        sbx.files.read.return_value = raw
+
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert len(result) == 1
+
+        event = json.loads(result[0])
+        assert event["type"] == "file"
+        assert event["name"] == "output.txt"
+        assert event["path"] == "/home/user/output.txt"
+        assert event["size"] == len(raw)
+        assert base64.b64decode(event["data"]) == raw
+
+    def test_handles_read_failure(self):
+        sbx = self._sbx()
+        entries = [_make_entry("good.txt", size=10), _make_entry("bad.txt", size=10)]
+        sbx.files.list.return_value = entries
+        sbx.files.read.side_effect = [b"ok", Exception("read error")]
+
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        # Only the successfully read file is returned
+        assert len(result) == 1
+        event = json.loads(result[0])
+        assert event["name"] == "good.txt"

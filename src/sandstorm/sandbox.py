@@ -520,6 +520,8 @@ def _build_agent_config(
     if env_append and sys_prompt:
         if isinstance(sys_prompt, dict) and "append" in sys_prompt:
             sys_prompt = {**sys_prompt, "append": sys_prompt["append"] + "\n\n" + env_append}
+        elif isinstance(sys_prompt, dict):
+            sys_prompt = {**sys_prompt, "append": env_append}
         elif isinstance(sys_prompt, str):
             sys_prompt = sys_prompt + "\n\n" + env_append
     elif env_append and not sys_prompt:
