@@ -33,8 +33,7 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - run: uv sync --extra dev
       - run: uv run pytest tests/ --cov=sandstorm --cov-report=xml
-      - uses: codecov/codecov-action@v4
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+      - uses: codecov/codecov-action@v5
         with:
           files: coverage.xml
           fail_ci_if_error: false
