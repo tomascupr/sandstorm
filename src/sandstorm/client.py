@@ -72,7 +72,8 @@ class SandstormClient:
 
     async def health(self) -> dict:
         """Check server health."""
-        assert self._client is not None, "Use 'async with' to create the client"
+        if self._client is None:
+            raise RuntimeError("Use 'async with' to create the client")
         resp = await self._client.get("/health")
         resp.raise_for_status()
         return resp.json()
@@ -102,7 +103,8 @@ class SandstormClient:
         """
         from httpx_sse import aconnect_sse
 
-        assert self._client is not None, "Use 'async with' to create the client"
+        if self._client is None:
+            raise RuntimeError("Use 'async with' to create the client")
 
         body: dict = {"prompt": prompt, **kwargs}
         if model is not None:

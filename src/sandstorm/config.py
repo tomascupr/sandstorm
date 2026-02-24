@@ -132,8 +132,8 @@ def load_sandstorm_config() -> dict | None:
 
     try:
         raw = json.loads(config_path.read_text())
-    except json.JSONDecodeError as exc:
-        logger.error("sandstorm.json: invalid JSON — %s", exc)
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.error("sandstorm.json: failed to read — %s", exc)
         return None
 
     if not isinstance(raw, dict):

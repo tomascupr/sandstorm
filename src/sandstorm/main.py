@@ -176,14 +176,15 @@ async def health(deep: bool = Query(False, description="Run deep health checks")
 
     # Check E2B API reachability
     try:
+        import asyncio
         import urllib.request
 
         req = urllib.request.Request(
             "https://api.e2b.dev/health",
             method="GET",
         )
-        with urllib.request.urlopen(req, timeout=5):
-            result["checks"]["e2b_api"] = True
+        await asyncio.to_thread(urllib.request.urlopen, req, timeout=5)
+        result["checks"]["e2b_api"] = True
     except Exception:
         result["checks"]["e2b_api"] = False
         result["status"] = "degraded"
