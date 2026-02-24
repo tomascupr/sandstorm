@@ -3,7 +3,6 @@
 Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
 [![CI](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/tomascupr/sandstorm/branch/main/graph/badge.svg)](https://codecov.io/gh/tomascupr/sandstorm)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
