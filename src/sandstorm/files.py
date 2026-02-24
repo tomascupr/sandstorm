@@ -35,6 +35,8 @@ async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: st
         # Collect parent dirs that need creation (deduplicate, skip top-level files)
         dirs_to_create: set[str] = set()
         for path in files:
+            if ".." in path.split("/"):
+                raise ValueError(f"Invalid file path: {path!r}")
             parent = posixpath.dirname(path)
             if parent:  # non-empty means nested path like "src/main.py"
                 dirs_to_create.add(f"/home/user/{parent}")
