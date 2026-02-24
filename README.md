@@ -2,6 +2,8 @@
 
 Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 
+[![CI](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tomascupr/sandstorm/branch/main/graph/badge.svg)](https://codecov.io/gh/tomascupr/sandstorm)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
 [![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
 [![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
@@ -126,12 +128,31 @@ ds "hello" --anthropic-api-key sk-ant-... --e2b-api-key e2b_...
 
 ## How It Works
 
-```
-Client --POST /query--> FastAPI --> E2B Sandbox (isolated VM)
-  <---- SSE stream <---- stdout <-- runner.mjs --> query() from Agent SDK
-                                     |-- Bash, Read, Write, Edit
-                                     |-- Glob, Grep, WebSearch, WebFetch
-                                     '-- subagents, MCP servers, structured output
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as Sandstorm (FastAPI)
+    participant E2B as E2B Sandbox
+    participant SDK as Claude Agent SDK
+
+    Client->>FastAPI: POST /query {prompt, files}
+    FastAPI->>E2B: Create sandbox
+    E2B-->>FastAPI: Sandbox ready
+    FastAPI->>E2B: Upload runner + config + files
+    FastAPI->>E2B: node runner.mjs
+    E2B->>SDK: query(prompt, tools, config)
+
+    loop Agent execution
+        SDK->>E2B: Tool calls (Bash, Read, Write, WebSearch...)
+        E2B-->>SDK: Tool results
+        E2B-->>FastAPI: stdout (JSON lines)
+        FastAPI-->>Client: SSE events
+    end
+
+    SDK-->>E2B: Final result
+    E2B-->>FastAPI: Result + cost
+    FastAPI-->>Client: SSE result event
+    FastAPI->>E2B: Kill sandbox
 ```
 
 1. Your app sends a prompt to `POST /query`
@@ -471,7 +492,19 @@ Receives E2B sandbox lifecycle events (created, updated, killed). Verifies HMAC-
 
 ### `GET /health`
 
-Returns `{"status": "ok"}`
+Returns `{"status": "ok", "version": "..."}`. Add `?deep=true` to check E2B API reachability and configured API keys:
+
+```json
+{
+  "status": "ok",
+  "version": "0.7.1",
+  "checks": {
+    "anthropic_api_key": true,
+    "e2b_api_key": true,
+    "e2b_api": true
+  }
+}
+```
 
 ### SSE Event Types
 
@@ -487,20 +520,21 @@ Returns `{"status": "ok"}`
 
 ### Python
 
-```python
-import httpx
-from httpx_sse import connect_sse
+```bash
+pip install "duvo-sandstorm[client]"
+```
 
-with httpx.Client() as client:
-    with connect_sse(
-        client, "POST",
-        "https://your-sandstorm-host/query",
-        json={
-            "prompt": "Scrape the top 50 HN stories, cluster by topic, save to output/hn.csv"
-        },
-    ) as events:
-        for sse in events.iter_sse():
-            print(sse.data)
+```python
+import asyncio
+from sandstorm import SandstormClient
+
+async def main():
+    async with SandstormClient("https://your-sandstorm-host") as client:
+        async for event in client.query("Scrape the top 50 HN stories, cluster by topic"):
+            if event.text:
+                print(event.text, end="")
+
+asyncio.run(main())
 ```
 
 ### TypeScript
@@ -529,16 +563,13 @@ Sandstorm is stateless -- each request creates an independent sandbox. No shared
 
 ### Docker
 
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-COPY . .
-RUN pip install --no-cache-dir .  # or: pip install duvo-sandstorm
-EXPOSE 8000
-CMD ["ds", "serve", "--host", "0.0.0.0", "--port", "8000"]
-```
+The repo includes a `Dockerfile` and `docker-compose.yml` with health checks pre-configured:
 
 ```bash
+# Using Docker Compose (recommended)
+docker compose up
+
+# Or build and run manually
 docker build -t sandstorm .
 docker run -p 8000:8000 --env-file .env sandstorm
 ```

@@ -12,4 +12,17 @@ def test_health_returns_200():
 
 def test_health_returns_status_ok():
     response = client.get("/health")
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "version" in data
+
+
+def test_health_deep_check():
+    response = client.get("/health?deep=true")
+    data = response.json()
+    assert data["status"] in ("ok", "degraded")
+    assert "version" in data
+    assert "checks" in data
+    assert "anthropic_api_key" in data["checks"]
+    assert "e2b_api_key" in data["checks"]
+    assert "e2b_api" in data["checks"]

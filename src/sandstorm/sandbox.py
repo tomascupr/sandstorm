@@ -1,5 +1,6 @@
+"""E2B sandbox lifecycle: create, run agent, stream output, cleanup."""
+
 import asyncio
-import base64
 import contextlib
 import json
 import logging
@@ -8,12 +9,14 @@ import posixpath
 import shlex
 import time
 from collections.abc import AsyncGenerator
-from importlib.resources import files
+from importlib.resources import files as pkg_files
 from pathlib import Path
 
 from e2b import AsyncSandbox, NotFoundException
 
-from .models import NAME_PATTERN, QueryRequest
+from .config import _PROVIDER_ENV_KEYS, _build_agent_config, load_sandstorm_config
+from .files import _extract_generated_files, _load_skills_dir, _upload_files, _upload_skills
+from .models import QueryRequest
 from .telemetry import (
     get_tracer,
     record_agent_execution,
@@ -36,130 +39,12 @@ SDK_VERSION = "0.2.42"
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
 _RUNNER_TIMEOUT = 1800  # Max agent execution time (30 minutes)
-_MAX_EXTRACT_FILES = 10  # Max files to extract from sandbox after agent run
-_MAX_EXTRACT_FILE_SIZE = 25 * 1024 * 1024  # 25 MB per file (Slack upload limit)
-# Note: Vercel serverless has a 4.5 MB response limit — base64-encoded files
-# larger than ~3 MB will exceed this. Self-hosted and Slack deployments are unaffected.
-_MAX_EXTRACT_TOTAL_SIZE = 50 * 1024 * 1024  # 50 MB total extraction budget
-_SKILL_NAME_PATTERN = NAME_PATTERN
-
-# Load the runner script that executes inside the sandbox
-_RUNNER_SCRIPT = files("sandstorm").joinpath("runner.mjs").read_text()
-
-
-def _get_config_path() -> Path:
-    """Resolve sandstorm.json from the current working directory."""
-    return Path.cwd() / "sandstorm.json"
-
 
 # Path inside the sandbox where GCP credentials are uploaded
 _GCP_CREDENTIALS_SANDBOX_PATH = "/home/user/.config/gcloud/service_account.json"
 
-# Provider env vars auto-forwarded from .env into the sandbox
-_PROVIDER_ENV_KEYS = [
-    # Google Vertex AI
-    "CLAUDE_CODE_USE_VERTEX",
-    "CLOUD_ML_REGION",
-    "ANTHROPIC_VERTEX_PROJECT_ID",
-    # Amazon Bedrock
-    "CLAUDE_CODE_USE_BEDROCK",
-    "AWS_REGION",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    # Microsoft Azure / Foundry
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "AZURE_FOUNDRY_RESOURCE",
-    "AZURE_API_KEY",
-    # Custom base URL (proxy, self-hosted, OpenRouter)
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_AUTH_TOKEN",
-    # Model name overrides (remap SDK aliases to provider model IDs)
-    "ANTHROPIC_DEFAULT_SONNET_MODEL",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    # MCP server credentials
-    "LINEAR_API_KEY",
-]
-
-
-def _validate_sandstorm_config(raw: dict) -> dict:
-    """Validate known sandstorm.json fields, drop invalid ones with warnings."""
-    # Expected field types: field_name -> (allowed types tuple, human description)
-    known_fields: dict[str, tuple[tuple[type, ...], str]] = {
-        "system_prompt": ((str, dict), "str or dict"),
-        "system_prompt_append": ((str,), "str"),
-        "model": ((str,), "str"),
-        "max_turns": ((int,), "int"),
-        "output_format": ((dict,), "dict"),
-        "agents": ((dict, list), "dict or list"),
-        "mcp_servers": ((dict,), "dict"),
-        "skills_dir": ((str,), "str"),
-        "allowed_tools": ((list,), "list"),
-        "webhook_url": ((str,), "str"),
-        "timeout": ((int,), "int"),
-        "template_skills": ((bool,), "bool"),
-    }
-
-    validated: dict = {}
-    for key, value in raw.items():
-        if key in known_fields:
-            allowed_types, type_desc = known_fields[key]
-            # Reject booleans masquerading as int (isinstance(True, int) is True)
-            if isinstance(value, bool) and bool not in allowed_types:
-                logger.warning(
-                    "sandstorm.json: field %r should be %s, got bool — skipping",
-                    key,
-                    type_desc,
-                )
-                continue
-            if not isinstance(value, allowed_types):
-                logger.warning(
-                    "sandstorm.json: field %r should be %s, got %s — skipping",
-                    key,
-                    type_desc,
-                    type(value).__name__,
-                )
-                continue
-            validated[key] = value
-        else:
-            logger.warning("sandstorm.json: unknown field %r — ignoring", key)
-
-    if "skills_dir" in validated:
-        skills_dir_path = Path.cwd() / validated["skills_dir"]
-        if not skills_dir_path.is_dir():
-            logger.warning(
-                "sandstorm.json: skills_dir %r does not exist — ignoring",
-                validated["skills_dir"],
-            )
-            del validated["skills_dir"]
-
-    if "allowed_tools" in validated and not all(
-        isinstance(t, str) for t in validated["allowed_tools"]
-    ):
-        logger.warning("sandstorm.json: allowed_tools entries must be strings — skipping")
-        del validated["allowed_tools"]
-
-    return validated
-
-
-def load_sandstorm_config() -> dict | None:
-    """Load sandstorm.json from the project root if it exists."""
-    config_path = _get_config_path()
-    if not config_path.exists():
-        return None
-
-    try:
-        raw = json.loads(config_path.read_text())
-    except json.JSONDecodeError as exc:
-        logger.error("sandstorm.json: invalid JSON — %s", exc)
-        return None
-
-    if not isinstance(raw, dict):
-        logger.error("sandstorm.json: expected a JSON object, got %s", type(raw).__name__)
-        return None
-
-    return _validate_sandstorm_config(raw)
+# Load the runner script that executes inside the sandbox
+_RUNNER_SCRIPT = pkg_files("sandstorm").joinpath("runner.mjs").read_text()
 
 
 def _read_gcp_credentials() -> str | None:
@@ -239,111 +124,6 @@ async def _create_sandbox(
         return sbx
 
 
-async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: str) -> None:
-    """Upload user files to the sandbox, creating parent directories as needed."""
-    total_size = sum(len(c.encode()) for c in files.values())
-    with get_tracer().start_as_current_span(
-        "sandbox.upload_files",
-        attributes={
-            "sandstorm.file_count": len(files),
-            "sandstorm.total_size_bytes": total_size,
-        },
-    ):
-        logger.info("[%s] Uploading %d files", request_id, len(files))
-        # Collect parent dirs that need creation (deduplicate, skip top-level files)
-        dirs_to_create: set[str] = set()
-        for path in files:
-            parent = posixpath.dirname(path)
-            if parent:  # non-empty means nested path like "src/main.py"
-                dirs_to_create.add(f"/home/user/{parent}")
-
-        if dirs_to_create:
-            mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs_to_create))
-            await sbx.commands.run(mkdir_cmd, timeout=10)
-
-        try:
-            await sbx.files.write_files(
-                [
-                    {"path": f"/home/user/{path}", "data": content}
-                    for path, content in files.items()
-                ]
-            )
-        except Exception as exc:
-            paths = ", ".join(files.keys())
-            raise RuntimeError(
-                f"Failed to upload {len(files)} files ({paths}) to sandbox: {exc}"
-            ) from exc
-
-
-def _load_skills_dir(skills_dir: str) -> dict[str, dict[str, str]]:
-    """Read all files from each skill subdirectory into {name: {relative_path: content}}.
-
-    Each subdirectory must contain a SKILL.md to be recognized as a valid skill.
-    .DS_Store files are skipped.
-    """
-    base = Path.cwd() / skills_dir
-    skills: dict[str, dict[str, str]] = {}
-    if not base.is_dir():
-        return skills
-    for entry in base.iterdir():
-        if not entry.is_dir():
-            continue
-        if not _SKILL_NAME_PATTERN.match(entry.name):
-            logger.warning("skills_dir: skipping %r (invalid name)", entry.name)
-            continue
-        skill_file = entry / "SKILL.md"
-        if not skill_file.is_file():
-            continue
-        skill_files: dict[str, str] = {}
-        for file_path in entry.rglob("*"):
-            if not file_path.is_file():
-                continue
-            if file_path.name == ".DS_Store":
-                continue
-            relative = file_path.relative_to(entry)
-            skill_files[str(relative)] = file_path.read_text()
-        skills[entry.name] = skill_files
-    return skills
-
-
-async def _upload_skills(
-    sbx: AsyncSandbox, skills: dict[str, dict[str, str]], request_id: str
-) -> None:
-    """Upload all skill files to /home/user/.claude/skills/<name>/ in the sandbox."""
-    with get_tracer().start_as_current_span(
-        "sandbox.upload_skills",
-        attributes={"sandstorm.skill_count": len(skills)},
-    ):
-        logger.info("[%s] Uploading %d skills", request_id, len(skills))
-        # Collect all directories that need creation (skill roots + subdirs)
-        dirs: set[str] = set()
-        for name, skill_files in skills.items():
-            dirs.add(f"/home/user/.claude/skills/{name}")
-            for rel_path in skill_files:
-                parent = posixpath.dirname(rel_path)
-                if parent:
-                    dirs.add(f"/home/user/.claude/skills/{name}/{parent}")
-        mkdir_cmd = " && ".join(f"mkdir -p {shlex.quote(d)}" for d in sorted(dirs))
-        await sbx.commands.run(mkdir_cmd, timeout=10)
-        # Batch write all skill files
-        write_list = []
-        for name, skill_files in skills.items():
-            for rel_path, content in skill_files.items():
-                write_list.append(
-                    {
-                        "path": f"/home/user/.claude/skills/{name}/{rel_path}",
-                        "data": content,
-                    }
-                )
-        try:
-            await sbx.files.write_files(write_list)
-        except Exception as exc:
-            names = ", ".join(skills.keys())
-            raise RuntimeError(
-                f"Failed to upload {len(skills)} skills ({names}) to sandbox: {exc}"
-            ) from exc
-
-
 async def _cleanup(task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str) -> None:
     """Cancel the background command task and destroy the sandbox."""
     with get_tracer().start_as_current_span(
@@ -372,185 +152,6 @@ async def _cleanup(task: asyncio.Task | None, sbx: AsyncSandbox, request_id: str
 def _to_str(data) -> str:
     """Coerce callback data to str (E2B may pass non-string types)."""
     return data if isinstance(data, str) else str(data)
-
-
-async def _extract_generated_files(
-    sbx: AsyncSandbox,
-    input_file_names: set[str],
-    request_id: str,
-) -> list[str]:
-    """Extract new files created by the agent in /home/user/.
-
-    Lists the working directory, filters out input files / dotfiles / directories,
-    reads each new file as bytes, and returns a list of JSON-encoded file events.
-    """
-    entries = await sbx.files.list("/home/user/")
-
-    candidates = []
-    for entry in entries:
-        # Skip directories (entry.type is Optional[FileType])
-        if entry.type is None or entry.type.value != "file":
-            continue
-        # Skip dotfiles
-        if entry.name.startswith("."):
-            continue
-        # Skip files that were uploaded as input
-        if entry.name in input_file_names:
-            continue
-        # Skip known large files early (before downloading)
-        if entry.size > _MAX_EXTRACT_FILE_SIZE:
-            logger.info(
-                "[%s] Skipping oversized file: %s (%d bytes)",
-                request_id,
-                entry.name,
-                entry.size,
-            )
-            continue
-        candidates.append(entry)
-
-    if not candidates:
-        logger.debug("[%s] No new files to extract", request_id)
-        return []
-
-    if len(candidates) > _MAX_EXTRACT_FILES:
-        logger.info(
-            "[%s] Capping file extraction at %d (found %d)",
-            request_id,
-            _MAX_EXTRACT_FILES,
-            len(candidates),
-        )
-        candidates = candidates[:_MAX_EXTRACT_FILES]
-
-    events: list[str] = []
-    total_size = 0
-    for entry in candidates:
-        try:
-            data = await sbx.files.read(entry.path, format="bytes")
-            raw = data if isinstance(data, bytes) else bytes(data)
-            size = len(raw)
-
-            if total_size + size > _MAX_EXTRACT_TOTAL_SIZE:
-                logger.info("[%s] Total extraction size limit reached", request_id)
-                break
-
-            total_size += size
-            encoded = base64.b64encode(raw).decode("ascii")
-            events.append(
-                json.dumps(
-                    {
-                        "type": "file",
-                        "name": entry.name,
-                        "path": entry.path,
-                        "size": size,
-                        "data": encoded,
-                    }
-                )
-            )
-            logger.info("[%s] Extracted file: %s (%d bytes)", request_id, entry.name, size)
-        except Exception:
-            logger.warning("[%s] Failed to read %s", request_id, entry.name, exc_info=True)
-
-    return events
-
-
-def _build_agent_config(
-    request: QueryRequest,
-    sandstorm_config: dict,
-    disk_skills: dict[str, dict[str, str]],
-) -> tuple[dict, dict[str, dict[str, str]]]:
-    """Build agent_config dict and merged_skills from config + request overrides.
-
-    Returns (agent_config, merged_skills) so the caller can upload skills
-    and write agent_config.json into the sandbox.
-    """
-    merged_skills = dict(disk_skills)
-
-    # Merge extra skills first (wrap inline content as SKILL.md), then apply whitelist.
-    # Note: template_skills are baked into the sandbox image and always present
-    # regardless of this whitelist — only disk_skills and extra_skills are filtered.
-    if request.extra_skills:
-        for name, content in request.extra_skills.items():
-            merged_skills[name] = {"SKILL.md": content}
-    if request.allowed_skills is not None:
-        allowed = set(request.allowed_skills)
-        merged_skills = {k: v for k, v in merged_skills.items() if k in allowed}
-
-    has_skills = bool(merged_skills) or sandstorm_config.get("template_skills", False)
-
-    # Apply MCP servers whitelist
-    mcp_servers = sandstorm_config.get("mcp_servers")
-    if mcp_servers is not None and request.allowed_mcp_servers is not None:
-        allowed = set(request.allowed_mcp_servers)
-        mcp_servers = {k: v for k, v in mcp_servers.items() if k in allowed}
-
-    # Merge extra agents first, then apply whitelist to combined result
-    agents_config = sandstorm_config.get("agents")
-    if isinstance(agents_config, list) and (
-        request.extra_agents or request.allowed_agents is not None
-    ):
-        raise ValueError(
-            "extra_agents and allowed_agents require agents to be a dict"
-            " in sandstorm.json, got list"
-        )
-    if request.extra_agents:
-        agents_config = dict(agents_config) if agents_config is not None else {}
-        agents_config.update(request.extra_agents)
-    agents_whitelist = request.allowed_agents  # None = use all, [] = use none
-    if isinstance(agents_config, dict) and agents_whitelist is not None:
-        allowed = set(agents_whitelist)
-        agents_config = {k: v for k, v in agents_config.items() if k in allowed}
-
-    # Request-level allowed_tools overrides sandstorm.json
-    allowed_tools_from_request = request.allowed_tools is not None
-    allowed_tools = (
-        request.allowed_tools
-        if allowed_tools_from_request
-        else sandstorm_config.get("allowed_tools")
-    )
-    # Auto-add "Skill" only for config-sourced allowed_tools (not explicit request override)
-    if (
-        allowed_tools is not None
-        and has_skills
-        and not allowed_tools_from_request
-        and "Skill" not in allowed_tools
-    ):
-        allowed_tools = [*allowed_tools, "Skill"]
-
-    # Build system prompt, then apply append from config if set
-    sys_prompt = sandstorm_config.get("system_prompt")
-    env_append = sandstorm_config.get("system_prompt_append")
-    if env_append and sys_prompt:
-        if isinstance(sys_prompt, dict) and "append" in sys_prompt:
-            sys_prompt = {**sys_prompt, "append": sys_prompt["append"] + "\n\n" + env_append}
-        elif isinstance(sys_prompt, dict):
-            sys_prompt = {**sys_prompt, "append": env_append}
-        elif isinstance(sys_prompt, str):
-            sys_prompt = sys_prompt + "\n\n" + env_append
-    elif env_append and not sys_prompt:
-        sys_prompt = env_append
-
-    timeout = request.timeout or sandstorm_config.get("timeout") or 300
-
-    agent_config = {
-        "prompt": request.prompt,
-        "cwd": "/home/user",
-        "model": request.model or sandstorm_config.get("model"),
-        "max_turns": request.max_turns or sandstorm_config.get("max_turns"),
-        "system_prompt": sys_prompt,
-        "output_format": (
-            request.output_format
-            if request.output_format is not None
-            else sandstorm_config.get("output_format")
-        )
-        or None,  # empty dict = explicitly disabled
-        "agents": agents_config,
-        "mcp_servers": mcp_servers,
-        "has_skills": has_skills,
-        "allowed_tools": allowed_tools,
-        "timeout": timeout,
-    }
-
-    return agent_config, merged_skills
 
 
 async def run_agent_in_sandbox(

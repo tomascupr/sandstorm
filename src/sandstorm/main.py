@@ -5,24 +5,23 @@ import logging
 import os
 import secrets
 import time
-import urllib.error
-import urllib.request
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from dotenv import load_dotenv
 from e2b import AuthenticationException, SandboxException
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
 from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
 from .auth import load_api_keys, verify_api_token
+from .config import load_sandstorm_config
+from .e2b_api import webhook_request
 from .models import QueryRequest
-from .sandbox import load_sandstorm_config, run_agent_in_sandbox
-from .slack_routes import router as slack_router
+from .sandbox import run_agent_in_sandbox
 from .store import run_store
 from .telemetry import (
     get_tracer,
@@ -42,28 +41,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_E2B_WEBHOOK_API = "https://api.e2b.app/events/webhooks"
-
 _WEBHOOK_SECRET = os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
-
-
-def _e2b_webhook_request(
-    method: str, path: str, api_key: str, data: dict | None = None
-) -> dict | list | None:
-    """Make a request to the E2B webhook API."""
-    url = f"{_E2B_WEBHOOK_API}{path}"
-    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
-    body = json.dumps(data).encode() if data else None
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        raise RuntimeError(f"E2B API returned {exc.code}: {detail}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Failed to reach E2B API: {exc.reason}") from exc
 
 
 def _auto_register_webhook() -> str | None:
@@ -104,7 +82,7 @@ def _auto_register_webhook() -> str | None:
     }
 
     try:
-        result = _e2b_webhook_request("POST", "", api_key, payload)
+        result = webhook_request("POST", "", api_key, payload)
         webhook_id = result.get("id") if isinstance(result, dict) else None
         logger.info("Auto-registered E2B webhook: id=%s url=%s", webhook_id, webhook_url)
         return webhook_id
@@ -119,7 +97,7 @@ def _auto_deregister_webhook(webhook_id: str | None) -> None:
         return
     try:
         api_key = os.environ.get("E2B_API_KEY", "")
-        _e2b_webhook_request("DELETE", f"/{webhook_id}", api_key)
+        webhook_request("DELETE", f"/{webhook_id}", api_key)
         logger.info("Deregistered E2B webhook: id=%s", webhook_id)
     except Exception:
         logger.warning("Failed to deregister E2B webhook id=%s", webhook_id, exc_info=True)
@@ -159,8 +137,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount Slack events endpoint
-app.include_router(slack_router)
+# Mount Slack events endpoint (requires `pip install "duvo-sandstorm[slack]"`)
+try:
+    from .slack_routes import router as slack_router
+
+    app.include_router(slack_router)
+except ImportError:
+    pass
 
 
 _DASHBOARD_HTML = (Path(__file__).parent / "dashboard.html").read_text()
@@ -181,8 +164,31 @@ async def list_runs():
 
 
 @app.get("/health", summary="Health check", description="Returns 200 if the server is running.")
-async def health():
-    return {"status": "ok"}
+async def health(deep: bool = Query(False, description="Run deep health checks")):
+    result: dict = {"status": "ok", "version": __version__}
+    if not deep:
+        return result
+
+    # Check configured API keys
+    result["checks"] = {}
+    result["checks"]["anthropic_api_key"] = bool(os.environ.get("ANTHROPIC_API_KEY"))
+    result["checks"]["e2b_api_key"] = bool(os.environ.get("E2B_API_KEY"))
+
+    # Check E2B API reachability
+    try:
+        import urllib.request
+
+        req = urllib.request.Request(
+            "https://api.e2b.dev/health",
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=5):
+            result["checks"]["e2b_api"] = True
+    except Exception:
+        result["checks"]["e2b_api"] = False
+        result["status"] = "degraded"
+
+    return result
 
 
 @app.post(

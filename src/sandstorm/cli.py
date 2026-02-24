@@ -14,8 +14,7 @@ import click
 from dotenv import load_dotenv
 
 from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
-
-_E2B_WEBHOOK_API = "https://api.e2b.app/events/webhooks"
+from sandstorm.e2b_api import E2BApiError, webhook_request
 
 
 class _DefaultQueryGroup(click.Group):
@@ -193,24 +192,14 @@ def _get_e2b_api_key(explicit: str | None) -> str:
     return key
 
 
-def _webhook_request(
+def _cli_webhook_request(
     method: str, path: str, api_key: str, data: dict | None = None
 ) -> dict | list | None:
-    """Make a request to the E2B webhook API."""
-    url = f"{_E2B_WEBHOOK_API}{path}"
-    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
-    body = json.dumps(data).encode() if data else None
-    req = urllib.request.Request(url, data=body, headers=headers, method=method)
+    """CLI wrapper around webhook_request that exits on error."""
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            raw = resp.read()
-            return json.loads(raw) if raw else None
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")
-        click.echo(f"Error: E2B API returned {exc.code}: {detail}", err=True)
-        raise SystemExit(1) from exc
-    except urllib.error.URLError as exc:
-        click.echo(f"Error: Failed to reach E2B API: {exc.reason}", err=True)
+        return webhook_request(method, path, api_key, data)
+    except E2BApiError as exc:
+        click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1) from exc
 
 
@@ -258,7 +247,7 @@ def webhook_register(url: str, secret: str | None, e2b_api_key: str | None, no_s
         ],
     }
 
-    result = _webhook_request("POST", "", api_key, payload)
+    result = _cli_webhook_request("POST", "", api_key, payload)
     click.echo(f"Webhook registered: {json.dumps(result, indent=2)}")
 
     if not no_save:
@@ -275,7 +264,7 @@ def webhook_list(e2b_api_key: str | None) -> None:
     """List registered E2B webhooks."""
     load_dotenv()
     api_key = _get_e2b_api_key(e2b_api_key)
-    result = _webhook_request("GET", "", api_key)
+    result = _cli_webhook_request("GET", "", api_key)
 
     if not result:
         click.echo("No webhooks registered.")
@@ -295,7 +284,7 @@ def webhook_delete(webhook_id: str, e2b_api_key: str | None) -> None:
     """Delete an E2B webhook by ID."""
     load_dotenv()
     api_key = _get_e2b_api_key(e2b_api_key)
-    _webhook_request("DELETE", f"/{webhook_id}", api_key)
+    _cli_webhook_request("DELETE", f"/{webhook_id}", api_key)
     click.echo(f"Webhook {webhook_id} deleted.")
 
 

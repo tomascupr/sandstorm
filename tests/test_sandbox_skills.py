@@ -5,16 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
 
-from sandstorm.models import QueryRequest
-from sandstorm.sandbox import (
+from sandstorm.config import _build_agent_config, _validate_sandstorm_config
+from sandstorm.files import (
     _MAX_EXTRACT_FILE_SIZE,
     _MAX_EXTRACT_FILES,
     _MAX_EXTRACT_TOTAL_SIZE,
-    _build_agent_config,
     _extract_generated_files,
     _load_skills_dir,
-    _validate_sandstorm_config,
 )
+from sandstorm.models import QueryRequest
 
 
 class TestValidateSandstormConfigSkills:
