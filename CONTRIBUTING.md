@@ -34,6 +34,14 @@ uv run pre-commit install
 
 This runs ruff lint and format checks automatically before each commit.
 
+If you're changing optional integrations, install the matching extras as well:
+
+```bash
+uv sync --extra dev --extra client      # Python client / SSE helpers
+uv sync --extra dev --extra slack       # Slack bot
+uv sync --extra dev --extra telemetry   # OpenTelemetry
+```
+
 ## Code Quality
 
 All checks must pass before a PR can be merged:
@@ -41,7 +49,7 @@ All checks must pass before a PR can be merged:
 ```bash
 ruff check src/ tests/              # Lint
 ruff format --check src/ tests/     # Format check
-uv run --with pyright pyright src/sandstorm/  # Type check
+pyright src/sandstorm/              # Type check
 uv run pytest tests/                # Tests
 ```
 

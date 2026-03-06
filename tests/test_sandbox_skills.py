@@ -57,6 +57,14 @@ class TestValidateSandstormConfigSkills:
         config = _validate_sandstorm_config({"template_skills": 1})
         assert "template_skills" not in config
 
+    def test_max_turns_must_be_positive(self):
+        config = _validate_sandstorm_config({"max_turns": 0})
+        assert "max_turns" not in config
+
+    def test_timeout_must_be_within_bounds(self):
+        config = _validate_sandstorm_config({"timeout": 3601})
+        assert "timeout" not in config
+
 
 class TestLoadSkillsDir:
     def test_loads_skill_md_from_subdirs(self, tmp_path, monkeypatch):
@@ -441,6 +449,17 @@ class TestTimeoutResolution:
 
 
 @pytest.mark.usefixtures("_api_keys")
+class TestMaxTurnsResolution:
+    def test_request_max_turns_overrides_config(self):
+        config, _ = _build_agent_config(_req(max_turns=1), {"max_turns": 5}, {})
+        assert config["max_turns"] == 1
+
+    def test_config_max_turns_used_when_request_is_none(self):
+        config, _ = _build_agent_config(_req(), {"max_turns": 5}, {})
+        assert config["max_turns"] == 5
+
+
+@pytest.mark.usefixtures("_api_keys")
 class TestBuildAgentConfigOutputFormat:
     _FMT_A = {"type": "json_schema", "schema": {"type": "object"}}
     _FMT_B = {"type": "json_schema", "schema": {"type": "array"}}
@@ -581,15 +600,61 @@ class TestExtractGeneratedFiles:
         event = json.loads(result[0])
         assert event["type"] == "file"
         assert event["name"] == "output.txt"
+        assert event["relative_path"] == "output.txt"
         assert event["path"] == "/home/user/output.txt"
         assert event["size"] == len(raw)
         assert base64.b64decode(event["data"]) == raw
+
+    def test_extracts_nested_files_recursively(self):
+        sbx = self._sbx()
+
+        async def _list(path):
+            if path == "/home/user":
+                return [
+                    _make_entry("reports", type_val="directory", path="/home/user/reports"),
+                    _make_entry("top.txt", path="/home/user/top.txt"),
+                ]
+            if path == "/home/user/reports":
+                return [_make_entry("summary.json", path="/home/user/reports/summary.json")]
+            return []
+
+        sbx.files.list.side_effect = _list
+        sbx.files.read.side_effect = [b"nested", b"top"]
+
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        assert len(result) == 2
+
+        nested_event = json.loads(result[0])
+        top_event = json.loads(result[1])
+        assert nested_event["relative_path"] == "reports/summary.json"
+        assert nested_event["path"] == "/home/user/reports/summary.json"
+        assert top_event["relative_path"] == "top.txt"
+
+    def test_skips_nested_input_files_by_relative_path(self):
+        sbx = self._sbx()
+
+        async def _list(path):
+            if path == "/home/user":
+                return [_make_entry("reports", type_val="directory", path="/home/user/reports")]
+            if path == "/home/user/reports":
+                return [_make_entry("input.csv", path="/home/user/reports/input.csv")]
+            return []
+
+        sbx.files.list.side_effect = _list
+        result = asyncio.run(_extract_generated_files(sbx, {"reports/input.csv"}, "req1"))
+        assert result == []
 
     def test_handles_read_failure(self):
         sbx = self._sbx()
         entries = [_make_entry("good.txt", size=10), _make_entry("bad.txt", size=10)]
         sbx.files.list.return_value = entries
-        sbx.files.read.side_effect = [b"ok", Exception("read error")]
+
+        async def _read(path, format="bytes"):
+            if path.endswith("bad.txt"):
+                raise Exception("read error")
+            return b"ok"
+
+        sbx.files.read.side_effect = _read
 
         result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
         # Only the successfully read file is returned

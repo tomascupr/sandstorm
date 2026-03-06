@@ -9,14 +9,14 @@ features:
     display_name: Sandstorm
     always_online: true
   assistant_view:
-    assistant_description: "AI agent powered by Claude — runs code in isolated sandboxes"
+    assistant_description: "General-purpose AI agent powered by Claude — runs tasks in isolated sandboxes"
     suggested_prompts:
-      - title: Write and run code
-        message: "Create a Python script that..."
       - title: Analyze a file
         message: "Analyze the attached file..."
-      - title: Build something
-        message: "Build a REST API with..."
+      - title: Compare options
+        message: "Compare these competitor pages..."
+      - title: Draft content
+        message: "Draft a summary from this document..."
 oauth_config:
   scopes:
     bot:

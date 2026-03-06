@@ -34,6 +34,33 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run pytest tests/
 
+  client:
+    name: Client Extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra client
+      - run: uv run pytest tests/test_client.py
+
+  slack:
+    name: Slack Extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra slack
+      - run: uv run pytest tests/test_slack.py tests/test_slack_routes.py
+
+  telemetry:
+    name: Telemetry Extra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --extra dev --extra telemetry
+      - run: uv run pytest tests/test_telemetry.py
+
   build:
     name: Build Verification
     runs-on: ubuntu-latest

@@ -436,6 +436,7 @@ async def _stream_to_slack(
 
             elif event_type == "file":
                 file_name = event.get("name", "file")
+                file_title = event.get("relative_path") or file_name
                 file_data_b64 = event.get("data")
                 if file_data_b64:
                     try:
@@ -445,12 +446,12 @@ async def _stream_to_slack(
                             thread_ts=thread_ts,
                             content=file_data,
                             filename=file_name,
-                            title=file_name,
+                            title=file_title,
                         )
                         logger.info(
                             "[%s] Uploaded file %s (%d bytes)",
                             run_id,
-                            file_name,
+                            file_title,
                             len(file_data),
                         )
                     except Exception:
@@ -667,20 +668,23 @@ def create_slack_app(
 
     @assistant.thread_started
     async def handle_thread_started(say, set_suggested_prompts):
-        await say("Hi! I'm Sandstorm — I run code in secure sandboxes. What can I build for you?")
+        await say(
+            "Hi! I'm Sandstorm — I run general-purpose agent tasks in secure sandboxes. "
+            "What should I help with?"
+        )
         await set_suggested_prompts(
             prompts=[
-                {
-                    "title": "Write and run code",
-                    "message": "Create a Python script that...",
-                },
                 {
                     "title": "Analyze a file",
                     "message": "Analyze the attached file...",
                 },
                 {
-                    "title": "Build something",
-                    "message": "Build a REST API with...",
+                    "title": "Compare options",
+                    "message": "Compare these competitor pages...",
+                },
+                {
+                    "title": "Draft content",
+                    "message": "Draft a summary from this document...",
                 },
             ]
         )

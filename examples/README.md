@@ -1,42 +1,37 @@
 # Examples
 
-Ready-to-use `sandstorm.json` configs for common use cases. Each example is a self-contained directory — `cd` into it and run a prompt.
+Ready-to-use `sandstorm.json` configs for common use cases. Each example is a self-contained
+directory: `cd` into it, run `ds "<prompt>"`, and adjust the prompt or schema to fit your
+workflow.
 
-## Quick Start
+## Fastest Starters
 
 ```bash
 pip install duvo-sandstorm
 export ANTHROPIC_API_KEY=sk-ant-...
 export E2B_API_KEY=e2b_...
 
-cd examples/code-reviewer
-ds "Review this code for bugs" -f /path/to/your/file.py
+cd examples/competitive-analysis
+ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
-## Examples
+If you only try three examples first, use these:
 
-| Example | What it does | Difficulty |
-|---------|-------------|------------|
-| [Code Reviewer](code-reviewer/) | Structured code review with severity ratings | Beginner |
-| [Competitive Analysis](competitive-analysis/) | Research and compare competitors | Intermediate |
-| [Content Brief](content-brief/) | Generate content briefs with SEO research | Intermediate |
-| [Security Auditor](security-auditor/) | Multi-agent security audit with OWASP skill | Advanced |
+- [Competitive Analysis](competitive-analysis/) for live web research
+- [Content Brief](content-brief/) for search-driven content planning
+- [Issue Triage](issue-triage/) for uploaded reports, tickets, and transcripts
 
-## Feature Matrix
+## Pick A Starting Point
 
-| Feature | Code Reviewer | Competitive Analysis | Content Brief | Security Auditor |
-|---------|:---:|:---:|:---:|:---:|
-| `system_prompt` | x | x | x | x |
-| `output_format` | x | x | x | x |
-| `allowed_tools` | x | | | x |
-| `agents` | | | | x |
-| `skills_dir` | | | | x |
-| `max_turns` | | x | x | |
-| File uploads (`-f`) | x | | | x |
-| WebFetch | | x | | |
-| WebSearch | | x | x | |
-| Read-only sandbox | x | | | |
-| Multi-agent | | | | x |
+| Example | Best when you want to | Key features |
+|---------|------------------------|--------------|
+| [Competitive Analysis](competitive-analysis/) | Compare competitors using live web research | `output_format`, WebFetch, WebSearch |
+| [Content Brief](content-brief/) | Build an SEO/content brief from search results | `output_format`, WebSearch |
+| [Issue Triage](issue-triage/) | Classify and prioritize uploaded reports, tickets, or transcripts | `output_format`, `allowed_tools`, file uploads |
+| [Code Reviewer](code-reviewer/) | Review uploaded code with a strict JSON report | `output_format`, `allowed_tools`, file uploads |
+| [Repo Migration](repo-migration/) | Plan a staged migration for a repo or service | `output_format`, `allowed_tools`, file uploads |
+| [Docs to OpenAPI](docs-to-openapi/) | Crawl docs and extract endpoints into a draft spec | `output_format`, WebFetch, Write |
+| [Security Auditor](security-auditor/) | Run a multi-agent security audit with skills | `agents`, `skills_dir`, `allowed_tools` |
 
 ## How Examples Work
 
@@ -46,6 +41,22 @@ Each example directory contains:
 - **`README.md`** — usage guide with example prompts and sample output
 
 When you run `ds` from an example directory, Sandstorm loads the local `sandstorm.json` automatically. No code changes needed — just `cd` and run.
+
+## Typical Commands
+
+```bash
+# Research competitors
+cd examples/competitive-analysis
+ds "Compare Notion, Coda, and Slite for async product teams"
+
+# Build a content brief
+cd examples/content-brief
+ds "Create a content brief for a blog post about AI support automation"
+
+# Triage uploaded issues
+cd examples/issue-triage
+ds "Triage these support tickets for severity and next action" -f /path/to/issues.json
+```
 
 ## Creating Your Own
 

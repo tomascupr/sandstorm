@@ -163,3 +163,17 @@ class TestTimeoutBounds:
     def test_valid_timeout(self):
         req = QueryRequest(prompt="test", timeout=60)
         assert req.timeout == 60
+
+
+class TestMaxTurnsBounds:
+    def test_default_max_turns(self):
+        req = QueryRequest(prompt="test")
+        assert req.max_turns is None
+
+    def test_max_turns_must_be_positive(self):
+        with pytest.raises(ValidationError, match="max_turns"):
+            QueryRequest(prompt="test", max_turns=0)
+
+    def test_valid_max_turns(self):
+        req = QueryRequest(prompt="test", max_turns=1)
+        assert req.max_turns == 1

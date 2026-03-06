@@ -1,0 +1,58 @@
+<svg width="1200" height="720" viewBox="0 0 1200 720" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1200" y2="720" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#07131F"/>
+      <stop offset="1" stop-color="#10243A"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="112" y1="96" x2="1088" y2="624" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB454" stop-opacity="0.25"/>
+      <stop offset="1" stop-color="#6BDFFF" stop-opacity="0.08"/>
+    </linearGradient>
+    <filter id="shadow" x="80" y="72" width="1040" height="576" filterUnits="userSpaceOnUse">
+      <feOffset dy="12"/>
+      <feGaussianBlur stdDeviation="16"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.00784314 0 0 0 0 0.0745098 0 0 0 0 0.129412 0 0 0 0.4 0"/>
+      <feBlend in2="SourceGraphic" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="720" rx="32" fill="url(#bg)"/>
+  <rect x="96" y="88" width="1008" height="544" rx="28" fill="url(#accent)" stroke="#29405A" stroke-width="2"/>
+
+  <g filter="url(#shadow)">
+    <rect x="112" y="104" width="472" height="512" rx="24" fill="#08111A" stroke="#243446" stroke-width="2"/>
+    <rect x="616" y="104" width="472" height="512" rx="24" fill="#0C1622" stroke="#243446" stroke-width="2"/>
+  </g>
+
+  <text x="148" y="148" fill="#C9D7E6" font-family="Menlo, Monaco, Consolas, monospace" font-size="22" font-weight="700">CLI / SSE stream</text>
+  <text x="652" y="148" fill="#C9D7E6" font-family="Menlo, Monaco, Consolas, monospace" font-size="22" font-weight="700">Dashboard / recent runs</text>
+
+  <rect x="148" y="176" width="400" height="48" rx="12" fill="#111E2C"/>
+  <text x="168" y="207" fill="#7AD7FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="19">ds "Compare three pricing pages and summarize..."</text>
+
+  <text x="148" y="262" fill="#FFB454" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">[tool: WebFetch] competitor pricing pages</text>
+  <text x="148" y="304" fill="#7AD7FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">Extracted plans, usage limits, and buyer signals.</text>
+  <text x="148" y="346" fill="#FFB454" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">[tool: Write] /home/user/output/summary.md</text>
+  <text x="148" y="388" fill="#7AD7FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">Saved comparison notes and a concise recommendation.</text>
+
+  <rect x="148" y="446" width="400" height="108" rx="16" fill="#101B27" stroke="#23374A" stroke-width="2"/>
+  <text x="170" y="482" fill="#E9F1F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">Result: success</text>
+  <text x="170" y="516" fill="#93A8BD" font-family="Menlo, Monaco, Consolas, monospace" font-size="17">turns: 7</text>
+  <text x="300" y="516" fill="#93A8BD" font-family="Menlo, Monaco, Consolas, monospace" font-size="17">cost: $0.0431</text>
+  <text x="170" y="548" fill="#93A8BD" font-family="Menlo, Monaco, Consolas, monospace" font-size="17">files: output/summary.md</text>
+
+  <rect x="652" y="176" width="400" height="56" rx="14" fill="#111E2C"/>
+  <text x="674" y="210" fill="#A9C3DA" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">id      status      model      cost      turns</text>
+
+  <rect x="652" y="252" width="400" height="64" rx="14" fill="#0F1A26"/>
+  <text x="674" y="290" fill="#E9F1F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">a18c32  completed   sonnet     $0.04     7</text>
+
+  <rect x="652" y="332" width="400" height="64" rx="14" fill="#0F1A26"/>
+  <text x="674" y="370" fill="#E9F1F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">f39d14  running     opus       --        11</text>
+
+  <rect x="652" y="412" width="400" height="64" rx="14" fill="#0F1A26"/>
+  <text x="674" y="450" fill="#E9F1F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="18">b09ef1  error       sonnet     --        3</text>
+
+  <rect x="652" y="510" width="400" height="44" rx="12" fill="#132230"/>
+  <text x="674" y="538" fill="#93A8BD" font-family="Menlo, Monaco, Consolas, monospace" font-size="16">Process-local run history with live refresh</text>
+</svg>

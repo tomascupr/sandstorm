@@ -20,7 +20,7 @@ ds "Compare Vercel, Netlify, and Cloudflare Pages as deployment platforms"
 
 ```bash
 # Analyze a market segment
-ds "Analyze the competitive landscape for AI code review tools"
+ds "Analyze the competitive landscape for AI meeting note products"
 
 # Compare specific products
 ds "Compare Stripe, Paddle, and LemonSqueezy for SaaS billing"

@@ -1,4 +1,9 @@
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .client import SandstormClient as SandstormClient
+    from .main import app as app
 
 try:
     __version__ = version("duvo-sandstorm")
@@ -6,7 +11,7 @@ except PackageNotFoundError:
     __version__ = "0.0.0-dev"
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "app":
         from .main import app
 

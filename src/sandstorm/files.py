@@ -6,6 +6,7 @@ import logging
 import posixpath
 import shlex
 from pathlib import Path
+from typing import Any
 
 from e2b import AsyncSandbox
 
@@ -19,6 +20,7 @@ _MAX_EXTRACT_FILE_SIZE = 25 * 1024 * 1024  # 25 MB per file (Slack upload limit)
 # Note: Vercel serverless has a 4.5 MB response limit — base64-encoded files
 # larger than ~3 MB will exceed this. Self-hosted and Slack deployments are unaffected.
 _MAX_EXTRACT_TOTAL_SIZE = 50 * 1024 * 1024  # 50 MB total extraction budget
+_SANDBOX_HOME = "/home/user"
 
 
 async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: str) -> None:
@@ -57,6 +59,17 @@ async def _upload_files(sbx: AsyncSandbox, files: dict[str, str], request_id: st
             raise RuntimeError(
                 f"Failed to upload {len(files)} files ({paths}) to sandbox: {exc}"
             ) from exc
+
+
+def _normalize_relative_path(path: str) -> str:
+    """Normalize a sandbox-relative path to a stable, slash-separated form."""
+    normalized = posixpath.normpath(path).lstrip("/")
+    return "" if normalized == "." else normalized
+
+
+def _has_hidden_segment(relative_path: str) -> bool:
+    """Return True if any path segment is hidden (starts with a dot)."""
+    return any(part.startswith(".") for part in relative_path.split("/") if part)
 
 
 def _load_skills_dir(skills_dir: str) -> dict[str, dict[str, str]]:
@@ -128,6 +141,35 @@ async def _upload_skills(
             ) from exc
 
 
+async def _list_files_recursive(
+    sbx: AsyncSandbox, root_path: str
+) -> list[tuple[Any, str]]:
+    """Return all file entries below root_path with normalized relative paths."""
+    stack = [root_path.rstrip("/")]
+    seen_dirs: set[str] = set()
+    results: list[tuple[Any, str]] = []
+
+    while stack:
+        current_dir = stack.pop()
+        if current_dir in seen_dirs:
+            continue
+        seen_dirs.add(current_dir)
+
+        for entry in await sbx.files.list(current_dir):
+            relative_path = _normalize_relative_path(posixpath.relpath(entry.path, root_path))
+            entry_type = entry.type.value if entry.type is not None else None
+
+            if entry_type == "directory":
+                if relative_path and not _has_hidden_segment(relative_path):
+                    stack.append(entry.path.rstrip("/"))
+                continue
+
+            if entry_type == "file":
+                results.append((entry, relative_path or entry.name))
+
+    return results
+
+
 async def _extract_generated_files(
     sbx: AsyncSandbox,
     input_file_names: set[str],
@@ -138,29 +180,26 @@ async def _extract_generated_files(
     Lists the working directory, filters out input files / dotfiles / directories,
     reads each new file as bytes, and returns a list of JSON-encoded file events.
     """
-    entries = await sbx.files.list("/home/user/")
+    entries = await _list_files_recursive(sbx, _SANDBOX_HOME)
+    input_paths = {_normalize_relative_path(path) for path in input_file_names}
 
     candidates = []
-    for entry in entries:
-        # Skip directories (entry.type is Optional[FileType])
-        if entry.type is None or entry.type.value != "file":
+    for entry, relative_path in sorted(entries, key=lambda item: item[1]):
+        if not relative_path:
             continue
-        # Skip dotfiles
-        if entry.name.startswith("."):
+        if _has_hidden_segment(relative_path):
             continue
-        # Skip files that were uploaded as input
-        if entry.name in input_file_names:
+        if relative_path in input_paths:
             continue
-        # Skip known large files early (before downloading)
         if entry.size > _MAX_EXTRACT_FILE_SIZE:
             logger.info(
                 "[%s] Skipping oversized file: %s (%d bytes)",
                 request_id,
-                entry.name,
+                relative_path,
                 entry.size,
             )
             continue
-        candidates.append(entry)
+        candidates.append((entry, relative_path))
 
     if not candidates:
         logger.debug("[%s] No new files to extract", request_id)
@@ -177,7 +216,7 @@ async def _extract_generated_files(
 
     events: list[str] = []
     total_size = 0
-    for entry in candidates:
+    for entry, relative_path in candidates:
         try:
             data = await sbx.files.read(entry.path, format="bytes")
             raw = data if isinstance(data, bytes) else bytes(data)
@@ -193,15 +232,16 @@ async def _extract_generated_files(
                 json.dumps(
                     {
                         "type": "file",
-                        "name": entry.name,
+                        "name": posixpath.basename(relative_path),
+                        "relative_path": relative_path,
                         "path": entry.path,
                         "size": size,
                         "data": encoded,
                     }
                 )
             )
-            logger.info("[%s] Extracted file: %s (%d bytes)", request_id, entry.name, size)
+            logger.info("[%s] Extracted file: %s (%d bytes)", request_id, relative_path, size)
         except Exception:
-            logger.warning("[%s] Failed to read %s", request_id, entry.name, exc_info=True)
+            logger.warning("[%s] Failed to read %s", request_id, relative_path, exc_info=True)
 
     return events

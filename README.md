@@ -1,6 +1,6 @@
 # Duvo.ai Sandstorm
 
-Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
+Run full AI agents in secure cloud sandboxes. One command. Zero runner boilerplate.
 
 [![CI](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml)
 [![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
@@ -10,17 +10,61 @@ Run AI agents in secure cloud sandboxes. One command. Zero infrastructure.
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Hundreds of AI agents running in parallel. Hours-long tasks. Tool use, file access, structured output — each in its own secure sandbox. Sounds hard. It's not.**
+![Sandstorm live run and dashboard](docs/assets/sandstorm-demo.svg)
+
+Sandstorm is a general-purpose agent runtime built on the Claude Agent SDK. It gives you Bash,
+file access, SSE streaming, structured output, and teardown-by-default isolation without making
+you build the runner yourself. Give it a prompt or API request, it spins up a fresh E2B VM,
+streams every step back, and destroys the sandbox when the task is done.
+
+## Best Fit
+
+- You want an API or CLI for real agent work, not just chat completions
+- You need isolation, file uploads, structured output, or Slack handoff without building the
+  runner yourself
+- You want to configure behavior with `sandstorm.json` instead of wiring orchestration code
+- Your tasks span research, content, support, docs, operations, or coding work
+
+## Not For
+
+- You need long-lived shared application state across runs
+- You want cluster-wide dashboard history or shared Slack sandbox reuse today
+- You need a full browser UI product out of the box rather than an agent runtime
+
+## Try It In 60 Seconds
 
 ```bash
-ds "Fetch all our webpages from git, analyze each for SEO and GEO, optimize them, and push the changes back"
+pip install duvo-sandstorm
+export ANTHROPIC_API_KEY=sk-ant-...
+export E2B_API_KEY=e2b_...
+ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
-That's it. Sandstorm wraps the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview) in isolated [E2B](https://e2b.dev) cloud sandboxes — the agent installs packages, fetches live data, generates files, and streams every step back via SSE. When it's done, the sandbox is destroyed. Nothing persists. Nothing escapes.
+If you want a more opinionated starting point, jump straight to [examples/](examples/):
+
+- [Competitive Analysis](examples/competitive-analysis/) for research across live websites
+- [Content Brief](examples/content-brief/) for search-driven writing briefs
+- [Issue Triage](examples/issue-triage/) for classifying uploaded reports or tickets
+
+## Why Not Just Wire The SDK Yourself?
+
+| Capability | Sandstorm | Raw Agent SDK + E2B | DIY runner |
+|------------|-----------|---------------------|------------|
+| Fresh sandbox per request | Built in | Manual wiring | Manual wiring |
+| SSE API endpoint | Built in | Manual wiring | Manual wiring |
+| File uploads | Built in | Manual wiring | Manual wiring |
+| `sandstorm.json` config layer | Built in | No | Custom work |
+| Slack bot integration | Built in | No | Custom work |
+| Structured output + whitelists | Built in | Manual wiring | Custom work |
 
 ### Why Sandstorm?
 
-Most companies want to use AI agents but hit the same wall: infrastructure, security concerns, and complexity. Sandstorm removes all three. It's a simplified, open-source version of the agent runtime we built at [duvo.ai](https://duvo.ai) — battle-tested in production.
+Sandstorm packages the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
+into isolated [E2B](https://e2b.dev) sandboxes so you can run production-style agents without
+building the runner, transport, and config layer yourself. It is not limited to coding agents:
+the same runtime works for research, content generation, document workflows, issue triage,
+competitive analysis, automation, and software tasks. It is the open-source version of the
+agent runtime we use at [duvo.ai](https://duvo.ai).
 
 - **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
 - **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
@@ -28,7 +72,7 @@ Most companies want to use AI agents but hit the same wall: infrastructure, secu
 - **Safe by design** -- every request gets a fresh VM that's destroyed after, with zero state leakage
 - **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
 - **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
-- **File uploads** -- send code, data, or configs for the agent to work with
+- **File uploads** -- send code, data, documents, transcripts, or configs for the agent to work with
 - **Slack bot** -- [@mention in channels](docs/slack.md), DM threads, file uploads, streaming responses, multi-turn conversations with sandbox reuse
 
 ### Get Started
@@ -37,7 +81,7 @@ Most companies want to use AI agents but hit the same wall: infrastructure, secu
 pip install duvo-sandstorm
 export ANTHROPIC_API_KEY=sk-ant-...
 export E2B_API_KEY=e2b_...
-ds "Find the top 10 trending Python repos on GitHub and summarize each in one sentence"
+ds "Summarize the top product announcements in AI infrastructure this week"
 ```
 
 If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
@@ -84,13 +128,13 @@ After installing, the `duvo-sandstorm` (or `ds`) command is available:
 The `query` command is the default — just pass a prompt directly:
 
 ```bash
-ds "Create hello.py and run it"
-ds "Analyze this repo" --model opus
-ds "Build a chart" --max-turns 30 --timeout 600
-ds "Fetch data" --json-output | jq '.type'
+ds "Compare Vercel, Netlify, and Cloudflare Pages for a startup team"
+ds "Create a content brief for a landing page about AI support agents" --model opus
+ds "Build a chart from the uploaded CSV" --max-turns 30 --timeout 600
+ds "Summarize the attached transcript and extract action items" --json-output | jq '.type'
 ```
 
-The explicit `query` subcommand also works: `ds query "Create hello.py"`.
+The explicit `query` subcommand also works: `ds query "Summarize this PDF and list the key risks"`.
 
 ### Upload files
 
@@ -99,7 +143,7 @@ Use `-f` / `--file` to send local files into the sandbox (repeatable):
 ```bash
 ds "Analyze this data and find outliers" -f data.csv
 ds "Compare these configs" -f prod.json -f staging.json
-ds "Review this code for bugs" -f src/main.py -f src/utils.py
+ds "Summarize this board deck" -f board-update.md
 ```
 
 Files are uploaded to `/home/user/{filename}` before the agent starts. Only text files are supported; binary files must be sent via the [API](#file-uploads) instead.
@@ -307,9 +351,12 @@ Ready-to-use configs for common use cases — `cd` into any example and run:
 
 | Example | What it does | Key features |
 |---------|-------------|--------------|
-| [Code Reviewer](examples/code-reviewer/) | Structured code review with severity ratings | `output_format`, `allowed_tools` |
 | [Competitive Analysis](examples/competitive-analysis/) | Research and compare competitors | `output_format`, WebFetch, WebSearch |
 | [Content Brief](examples/content-brief/) | Generate content briefs with SEO research | `output_format`, WebSearch |
+| [Issue Triage](examples/issue-triage/) | Classify, prioritize, and deduplicate incoming reports or issues | `output_format`, `allowed_tools`, file uploads |
+| [Code Reviewer](examples/code-reviewer/) | Structured code review with severity ratings | `output_format`, `allowed_tools` |
+| [Repo Migration](examples/repo-migration/) | Plan a staged migration from one stack or architecture to another | `output_format`, `allowed_tools`, file uploads |
+| [Docs to OpenAPI](examples/docs-to-openapi/) | Crawl docs and extract a draft API spec plus endpoint summary | `output_format`, WebFetch, Write |
 | [Security Auditor](examples/security-auditor/) | Multi-agent security audit with OWASP skill | `agents`, `skills_dir`, `output_format` |
 
 See [examples/](examples/) for the full feature matrix and usage guide.
@@ -415,7 +462,7 @@ Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Micros
 
 ## Dashboard
 
-Start the server and open `http://localhost:8000/` to see a live dashboard of all agent runs:
+Start the server and open `http://localhost:8000/` to see a live dashboard of recent agent runs handled by that server process:
 
 ```bash
 ds serve
@@ -426,7 +473,7 @@ The dashboard auto-refreshes every 3 seconds, showing status, model, cost, turns
 
 The `GET /runs` endpoint returns the same data as JSON for programmatic access.
 
-> **Note:** On Vercel, run history is limited to the current function invocation (ephemeral filesystem). For persistent history, use a long-running server.
+> **Note:** Dashboard history is process-local today. In multi-worker or multi-instance deployments, each process shows only the runs it handled. On Vercel, history is also limited to the current function invocation because the filesystem is ephemeral.
 
 ## Slack Bot
 
@@ -439,6 +486,8 @@ ds slack start    # Socket Mode (dev, no public URL needed)
 ```
 
 Then `@Sandstorm <task>` in any channel. For the full guide (HTTP mode, configuration, features), see [docs/slack.md](docs/slack.md).
+
+> **Deployment note:** Slack thread sandbox reuse is currently process-local. If you run multiple workers or instances, a follow-up thread reply may land on a different process and start a fresh sandbox unless you add sticky routing or a shared session backend.
 
 ## API Reference
 
@@ -556,9 +605,23 @@ while (true) {
 }
 ```
 
+## Roadmap
+
+Near-term work is focused on making Sandstorm easier to adopt and safer to run:
+
+- More opinionated starter templates for research, content, ops, support, and software tasks
+- Better cluster-safe state handling for dashboard history and Slack sandbox reuse
+- Richer client examples and docs for Python and TypeScript
+- More example outputs, screenshots, and launch-ready demo assets
+
+If you want to shape that roadmap, open an issue or join the repo discussions.
+
 ## Deployment
 
-Sandstorm is stateless -- each request creates an independent sandbox. No shared state, no sticky sessions. For production deployment with Gunicorn, concurrent agent execution, and scaling guidance, see the [deployment guide](docs/deployment.md).
+Core query execution is stateless -- each request creates an independent sandbox and tears it
+down when done. Dashboard history and Slack sandbox reuse are still process-local today. For
+production deployment with Gunicorn, concurrent agent execution, and scaling guidance, see the
+[deployment guide](docs/deployment.md).
 
 ### Docker
 
@@ -596,6 +659,8 @@ The repo includes `vercel.json` and `api/index.py` pre-configured. Set `ANTHROPI
 - **No persistence** -- nothing survives between requests
 
 > **Note:** The Anthropic API key is passed into the sandbox as an environment variable (the SDK requires it). The agent runs with `bypassPermissions` mode, so it has full access to the sandbox environment. Use per-request keys with spending limits for untrusted callers.
+
+For reporting vulnerabilities, see [SECURITY.md](SECURITY.md).
 
 ## License
 

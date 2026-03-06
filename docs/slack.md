@@ -2,6 +2,10 @@
 
 Run Sandstorm agents directly in Slack. @mention in channels, DM for 1:1 conversations. Every response streams in real-time, runs in an isolated sandbox, and supports file uploads, multi-turn threads, and feedback.
 
+Sandstorm is a general-purpose agent in Slack, not just a coding bot. You can use it for
+research, file analysis, content work, ops tasks, document processing, and software tasks in the
+same thread model.
+
 ## Setup
 
 ### 1. Install the Slack extra
@@ -43,11 +47,15 @@ This starts in Socket Mode (no public URL needed — great for development). The
 Mention the bot in any channel it's been invited to:
 
 ```
-@Sandstorm Create a Python script that fetches the top HN stories and saves them as CSV
+@Sandstorm Compare Notion, Coda, and Slite for async product teams
 ```
 
 ```
 @Sandstorm Analyze the attached CSV and find outliers
+```
+
+```
+@Sandstorm Turn the attached notes into a customer update draft
 ```
 
 The bot reacts with :eyes: while working, streams the response in the thread, and shows a metadata footer when done.
@@ -56,9 +64,9 @@ The bot reacts with :eyes: while working, streams the response in the thread, an
 
 Open a DM with the bot to start a 1:1 conversation. The bot shows suggested prompts to get started:
 
-- "Create a Python script that..."
 - "Analyze the attached file..."
-- "Build a REST API with..."
+- "Compare these competitor pages..."
+- "Draft a summary from this document..."
 
 Each DM thread is its own conversation with status updates ("Spinning up sandbox...", "Using Bash...").
 
@@ -67,10 +75,10 @@ Each DM thread is its own conversation with status updates ("Spinning up sandbox
 Thread context carries over automatically. The agent sees the full conversation history (including its own prior responses and any files shared) when you follow up in a thread:
 
 ```
-User:      @Sandstorm Create a Flask API with user auth
-Sandstorm: [builds the API, streams response]
-User:      @Sandstorm Now add rate limiting to the /login endpoint
-Sandstorm: [sees prior context, modifies the existing code]
+User:      @Sandstorm Compare our pricing page against two competitors
+Sandstorm: [researches sites, streams response]
+User:      @Sandstorm Now rewrite the summary for enterprise buyers
+Sandstorm: [sees prior context, updates the output]
 ```
 
 ## Features
@@ -101,6 +109,8 @@ Sandstorm: [sees prior context, modifies the existing code]
 ### sandstorm.json
 
 All `sandstorm.json` configuration applies to the Slack bot — system prompts, skills, subagents, MCP servers, allowed tools, and structured output all work the same way. The bot loads `sandstorm.json` from the working directory where `ds slack start` is run.
+
+> **Scaling note:** Sandbox reuse is process-local today. In a multi-worker or multi-instance deployment, thread replies may land on a different process and start a fresh sandbox unless you add sticky routing or your own shared session layer.
 
 ## Production (HTTP mode)
 

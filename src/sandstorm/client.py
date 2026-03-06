@@ -101,10 +101,16 @@ class SandstormClient:
         Yields:
             SandstormEvent for each SSE event.
         """
-        from httpx_sse import aconnect_sse
-
         if self._client is None:
             raise RuntimeError("Use 'async with' to create the client")
+
+        try:
+            from httpx_sse import aconnect_sse
+        except ImportError as exc:
+            raise RuntimeError(
+                "SandstormClient.query() requires the client extra. "
+                'Install with: pip install "duvo-sandstorm[client]"'
+            ) from exc
 
         body: dict = {"prompt": prompt, **kwargs}
         if model is not None:

@@ -19,7 +19,7 @@ class QueryRequest(BaseModel):
         json_schema_extra={
             "examples": [
                 {
-                    "prompt": "Create hello.py that prints 'Hello, world!' and run it",
+                    "prompt": "Compare two pricing pages and summarize the main differences",
                     "model": "sonnet",
                     "timeout": 300,
                 }
@@ -48,7 +48,9 @@ class QueryRequest(BaseModel):
         description="Model override (e.g. 'sonnet', 'opus'). Overrides sandstorm.json.",
     )
     max_turns: int | None = Field(
-        None, description="Max conversation turns. Overrides sandstorm.json."
+        None,
+        ge=1,
+        description="Max conversation turns (must be >= 1). Overrides sandstorm.json.",
     )
     output_format: dict | None = Field(
         default=None,

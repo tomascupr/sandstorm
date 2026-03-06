@@ -1,0 +1,37 @@
+{
+  "system_prompt": "You are an API technical writer. When given API docs, crawl them, infer the REST surface area, and generate a draft OpenAPI spec saved to /home/user/output/openapi.yaml. Be explicit about ambiguities and do not fabricate schemas when the docs are unclear. Return a compact summary of the extracted endpoints, auth model, files created, and open questions.",
+  "model": "sonnet",
+  "max_turns": 20,
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "base_url": { "type": "string" },
+        "auth_scheme": { "type": "string" },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "method": { "type": "string" },
+              "path": { "type": "string" },
+              "summary": { "type": "string" }
+            },
+            "required": ["method", "path", "summary"]
+          }
+        },
+        "files_created": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["summary", "endpoints", "files_created"]
+    }
+  }
+}

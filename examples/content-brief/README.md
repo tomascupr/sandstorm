@@ -20,10 +20,10 @@ ds "Create a content brief for a blog post about serverless vs containers in 202
 
 ```bash
 # Landing page brief
-ds "Brief for a landing page targeting enterprise DevOps teams evaluating AI coding tools"
+ds "Brief for a landing page targeting operations leaders evaluating AI support automation"
 
 # SEO-focused article
-ds "Create a brief for 'how to implement rate limiting in Node.js' targeting mid-level developers"
+ds "Create a brief for 'how to reduce customer support backlog with AI' targeting support managers"
 
 # Thought leadership
 ds "Brief for a LinkedIn article about why most AI agent frameworks will fail"

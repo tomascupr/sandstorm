@@ -1,0 +1,52 @@
+{
+  "system_prompt": "You are a staff engineer planning migrations. Analyze the uploaded repository files and the requested target architecture. Produce a staged migration plan that is concrete, low-drama, and implementation-ready. Call out files or modules likely to change, risky dependencies, rollback concerns, blockers, and validation steps. If the provided inputs are incomplete, say exactly what is missing instead of guessing.",
+  "model": "sonnet",
+  "allowed_tools": ["Read", "Glob", "Grep"],
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "current_stack": { "type": "string" },
+        "target_state": { "type": "string" },
+        "phases": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "goal": { "type": "string" },
+              "tasks": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "risks": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "success_criteria": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["name", "goal", "tasks", "success_criteria"]
+          }
+        },
+        "files_to_touch": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "blockers": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "validation_plan": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["summary", "current_stack", "target_state", "phases", "validation_plan"]
+    }
+  }
+}

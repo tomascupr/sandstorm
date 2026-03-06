@@ -1,0 +1,58 @@
+{
+  "system_prompt": "You are a triage engineer. Analyze the uploaded issue export, bug reports, or support transcript and classify each item by type, severity, labels, suggested owner, and next action. Prefer pragmatic engineering triage over customer support phrasing. Call out duplicates, incomplete reports, and items that are blocked on missing reproduction details.",
+  "model": "sonnet",
+  "allowed_tools": ["Read", "Glob", "Grep"],
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "triaged_items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "title": { "type": "string" },
+              "type": {
+                "type": "string",
+                "enum": ["bug", "feature", "support", "question"]
+              },
+              "severity": {
+                "type": "string",
+                "enum": ["critical", "high", "medium", "low"]
+              },
+              "labels": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "suggested_owner": { "type": "string" },
+              "next_action": { "type": "string" },
+              "missing_info": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["title", "type", "severity", "labels", "next_action"]
+          }
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "primary_id": { "type": "string" },
+              "duplicate_ids": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["primary_id", "duplicate_ids"]
+          }
+        }
+      },
+      "required": ["summary", "triaged_items"]
+    }
+  }
+}

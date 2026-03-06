@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Sandstorm is a stateless FastAPI app. Each request creates an independent E2B sandbox, runs the agent, and tears it down. No shared state, no sticky sessions, no coordination between requests. This means deploying for concurrent agent runs is trivial -- just add workers.
+Core query execution in Sandstorm is stateless: each request creates an independent E2B sandbox, runs the agent, and tears it down. That makes concurrent agent runs straightforward. Two convenience features are still process-local by default: dashboard run history (`.sandstorm/runs.jsonl`) and Slack thread sandbox reuse.
 
 ## Production Server
 
@@ -64,3 +64,8 @@ The Sandstorm server does almost no work itself -- it just proxies between your 
 - **Horizontal scaling** -- run multiple Sandstorm instances behind a load balancer. No shared state to worry about.
 - **Bottleneck is E2B** -- your concurrent sandbox limit depends on your [E2B plan](https://e2b.dev/pricing). The free tier allows a handful; paid plans scale higher.
 - **CPU/memory on the server is minimal** -- each request holds an open SSE connection and streams stdout. A single 2-core machine can comfortably handle dozens of concurrent agents.
+
+## Process-Local Features
+
+- **Dashboard run history** -- `GET /runs` and the `/` dashboard only show runs handled by the current process. Use a shared store if you need cluster-wide history.
+- **Slack thread sandbox reuse** -- follow-up Slack messages reuse a sandbox only when they hit the same process. Add sticky routing or a shared session backend if you need durable reuse across workers or instances.
