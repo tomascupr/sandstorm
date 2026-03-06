@@ -2,7 +2,7 @@ import asyncio
 import base64
 import json
 import logging
-from unittest.mock import AsyncMock, MagicMock, PropertyMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -65,6 +65,14 @@ class TestValidateSandstormConfigSkills:
     def test_timeout_must_be_within_bounds(self):
         config = _validate_sandstorm_config({"timeout": 3601})
         assert "timeout" not in config
+
+    def test_empty_model_dropped(self):
+        config = _validate_sandstorm_config({"model": ""})
+        assert "model" not in config
+
+    def test_whitespace_model_dropped(self):
+        config = _validate_sandstorm_config({"model": "   "})
+        assert "model" not in config
 
 
 class TestLoadSkillsDir:
@@ -553,78 +561,71 @@ class TestBuildAgentConfigSystemPromptAppend:
 # ---------------------------------------------------------------------------
 
 
-def _make_entry(name, *, type_val="file", size=100, path=None):
-    """Create a mock sandbox file entry."""
-    entry = MagicMock()
-    entry.name = name
-    entry.path = path or f"/home/user/{name}"
-    entry.size = size
-    type_mock = MagicMock()
-    type_mock.value = type_val
-    type(entry).type = PropertyMock(return_value=type_mock if type_val else None)
-    return entry
+def _cmd_result(stdout=""):
+    """Create a mock command result."""
+    result = MagicMock()
+    result.stdout = stdout
+    result.stderr = ""
+    result.exit_code = 0
+    result.error = None
+    return result
 
 
 class TestExtractGeneratedFiles:
-    def _sbx(self):
+    _MARKER = "/tmp/sandstorm.marker"
+
+    def _sbx(self, stdout=""):
         sbx = AsyncMock()
-        sbx.files.list = AsyncMock(return_value=[])
         sbx.files.read = AsyncMock(return_value=b"data")
+        sbx.commands.run = AsyncMock(side_effect=[_cmd_result(stdout), _cmd_result("")])
         return sbx
 
-    def test_skips_directories(self):
+    def test_returns_empty_when_no_recent_files(self):
         sbx = self._sbx()
-        sbx.files.list.return_value = [_make_entry("mydir", type_val="directory")]
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert result == []
+        sbx.files.read.assert_not_called()
 
     def test_skips_dotfiles(self):
-        sbx = self._sbx()
-        sbx.files.list.return_value = [_make_entry(".bashrc")]
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        sbx = self._sbx(".bashrc\t5\n")
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert result == []
 
     def test_skips_input_files(self):
-        sbx = self._sbx()
-        sbx.files.list.return_value = [_make_entry("input.csv")]
-        result = asyncio.run(_extract_generated_files(sbx, {"input.csv"}, "req1"))
+        sbx = self._sbx("input.csv\t5\n")
+        result = asyncio.run(_extract_generated_files(sbx, {"input.csv"}, "req1", self._MARKER))
         assert result == []
 
     def test_skips_oversized_files(self):
-        sbx = self._sbx()
-        sbx.files.list.return_value = [_make_entry("huge.bin", size=_MAX_EXTRACT_FILE_SIZE + 1)]
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        sbx = self._sbx(f"huge.bin\t{_MAX_EXTRACT_FILE_SIZE + 1}\n")
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert result == []
 
     def test_caps_at_max_files(self):
-        sbx = self._sbx()
-        entries = [_make_entry(f"file{i}.txt", size=10) for i in range(15)]
-        sbx.files.list.return_value = entries
+        stdout = "".join(f"file{i}.txt\t10\n" for i in range(15))
+        sbx = self._sbx(stdout)
         sbx.files.read.return_value = b"x"
 
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert len(result) == _MAX_EXTRACT_FILES
 
     def test_total_size_budget(self):
-        sbx = self._sbx()
+        sbx = self._sbx("a.bin\t100\nb.bin\t100\n")
         # Reported entry.size stays small here on purpose; the test verifies that the
         # extraction budget still uses the actual bytes returned by sbx.files.read().
         # Each returned payload is half the total budget + 1 byte, so only 1 fits.
         half_plus = _MAX_EXTRACT_TOTAL_SIZE // 2 + 1
-        entries = [_make_entry("a.bin", size=100), _make_entry("b.bin", size=100)]
-        sbx.files.list.return_value = entries
         sbx.files.read.return_value = b"x" * half_plus
 
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert len(result) == 1
 
     def test_returns_json_encoded_file_events(self):
-        sbx = self._sbx()
+        sbx = self._sbx("output.txt\t11\n")
         raw = b"hello world"
-        sbx.files.list.return_value = [_make_entry("output.txt", size=len(raw))]
         sbx.files.read.return_value = raw
 
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert len(result) == 1
 
         event = json.loads(result[0])
@@ -635,23 +636,17 @@ class TestExtractGeneratedFiles:
         assert event["size"] == len(raw)
         assert base64.b64decode(event["data"]) == raw
 
-    def test_extracts_nested_files_recursively(self):
-        sbx = self._sbx()
+    def test_extracts_nested_files_touched_this_turn(self):
+        sbx = self._sbx("reports/summary.json\t6\ntop.txt\t3\n")
 
-        async def _list(path):
-            if path == "/home/user":
-                return [
-                    _make_entry("reports", type_val="directory", path="/home/user/reports"),
-                    _make_entry("top.txt", path="/home/user/top.txt"),
-                ]
-            if path == "/home/user/reports":
-                return [_make_entry("summary.json", path="/home/user/reports/summary.json")]
-            return []
+        async def _read(path, format="bytes"):
+            if path.endswith("summary.json"):
+                return b"nested"
+            return b"top"
 
-        sbx.files.list.side_effect = _list
-        sbx.files.read.side_effect = [b"nested", b"top"]
+        sbx.files.read.side_effect = _read
 
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         assert len(result) == 2
 
         nested_event = json.loads(result[0])
@@ -661,23 +656,14 @@ class TestExtractGeneratedFiles:
         assert top_event["relative_path"] == "top.txt"
 
     def test_skips_nested_input_files_by_relative_path(self):
-        sbx = self._sbx()
-
-        async def _list(path):
-            if path == "/home/user":
-                return [_make_entry("reports", type_val="directory", path="/home/user/reports")]
-            if path == "/home/user/reports":
-                return [_make_entry("input.csv", path="/home/user/reports/input.csv")]
-            return []
-
-        sbx.files.list.side_effect = _list
-        result = asyncio.run(_extract_generated_files(sbx, {"reports/input.csv"}, "req1"))
+        sbx = self._sbx("reports/input.csv\t10\n")
+        result = asyncio.run(
+            _extract_generated_files(sbx, {"reports/input.csv"}, "req1", self._MARKER)
+        )
         assert result == []
 
     def test_handles_read_failure(self):
-        sbx = self._sbx()
-        entries = [_make_entry("good.txt", size=10), _make_entry("bad.txt", size=10)]
-        sbx.files.list.return_value = entries
+        sbx = self._sbx("good.txt\t10\nbad.txt\t10\n")
 
         async def _read(path, format="bytes"):
             if path.endswith("bad.txt"):
@@ -686,8 +672,18 @@ class TestExtractGeneratedFiles:
 
         sbx.files.read.side_effect = _read
 
-        result = asyncio.run(_extract_generated_files(sbx, set(), "req1"))
+        result = asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
         # Only the successfully read file is returned
         assert len(result) == 1
         event = json.loads(result[0])
         assert event["name"] == "good.txt"
+
+    def test_recent_scan_is_marker_scoped_and_bounded(self):
+        sbx = self._sbx()
+
+        asyncio.run(_extract_generated_files(sbx, set(), "req1", self._MARKER))
+
+        scan_cmd = sbx.commands.run.await_args_list[0].args[0]
+        assert f"-cnewer {self._MARKER}" in scan_cmd
+        assert f"head -n {_MAX_EXTRACT_FILES + 1}" in scan_cmd
+        sbx.files.list.assert_not_called()

@@ -1,12 +1,12 @@
 """File upload, skills loading, and file extraction for E2B sandboxes."""
 
 import base64
+import contextlib
 import json
 import logging
 import posixpath
 import shlex
 from pathlib import Path
-from typing import Any
 
 from e2b import AsyncSandbox
 
@@ -116,6 +116,13 @@ def _load_skills_dir(skills_dir: str) -> dict[str, dict[str, str]]:
     return skills
 
 
+async def _create_extraction_marker(sbx: AsyncSandbox, request_id: str) -> str:
+    """Create a per-run marker file used to find outputs touched during this turn."""
+    marker_path = f"/tmp/sandstorm-extract-{request_id}.marker"
+    await sbx.commands.run(f"touch {shlex.quote(marker_path)}", timeout=10)
+    return marker_path
+
+
 async def _upload_skills(
     sbx: AsyncSandbox, skills: dict[str, dict[str, str]], request_id: str
 ) -> None:
@@ -154,105 +161,106 @@ async def _upload_skills(
             ) from exc
 
 
-async def _list_files_recursive(sbx: AsyncSandbox, root_path: str) -> list[tuple[Any, str]]:
-    """Return all file entries below root_path with normalized relative paths."""
-    stack = [root_path.rstrip("/")]
-    seen_dirs: set[str] = set()
-    results: list[tuple[Any, str]] = []
-
-    while stack:
-        current_dir = stack.pop()
-        if current_dir in seen_dirs:
-            continue
-        seen_dirs.add(current_dir)
-
-        for entry in await sbx.files.list(current_dir):
-            relative_path = _normalize_relative_path(posixpath.relpath(entry.path, root_path))
-            entry_type = entry.type.value if entry.type is not None else None
-
-            if entry_type == "directory":
-                if relative_path and not _has_hidden_segment(relative_path):
-                    stack.append(entry.path.rstrip("/"))
-                continue
-
-            if entry_type == "file":
-                results.append((entry, relative_path or entry.name))
-
-    return results
-
-
 async def _extract_generated_files(
     sbx: AsyncSandbox,
     input_file_names: set[str],
     request_id: str,
+    marker_path: str,
 ) -> list[str]:
     """Extract new files created by the agent in /home/user/.
 
-    Lists the working directory, filters out input files / dotfiles / directories,
-    reads each new file as bytes, and returns a list of JSON-encoded file events.
+    Uses a per-run marker file to find files touched during this turn, filters out
+    input files / dotfiles, reads each new file as bytes, and returns a list of
+    JSON-encoded file events.
     """
-    entries = await _list_files_recursive(sbx, _SANDBOX_HOME)
     input_paths = {_normalize_relative_path(path) for path in input_file_names}
+    candidate_limit = _MAX_EXTRACT_FILES + 1
+    excluded_inputs = "".join(
+        f" ! -path {shlex.quote(posixpath.join(_SANDBOX_HOME, path))}"
+        for path in sorted(input_paths)
+        if path
+    )
+    find_cmd = (
+        f"find {shlex.quote(_SANDBOX_HOME)} "
+        f"-path '*/.*' -prune -o -type f -cnewer {shlex.quote(marker_path)} "
+        f"! -size +{_MAX_EXTRACT_FILE_SIZE}c"
+        f"{excluded_inputs} "
+        f"-printf '%P\\t%s\\n' | head -n {candidate_limit}"
+    )
 
-    candidates = []
-    for entry, relative_path in sorted(entries, key=lambda item: item[1]):
-        if not relative_path:
-            continue
-        if _has_hidden_segment(relative_path):
-            continue
-        if relative_path in input_paths:
-            continue
-        if entry.size > _MAX_EXTRACT_FILE_SIZE:
-            logger.info(
-                "[%s] Skipping oversized file: %s (%d bytes)",
-                request_id,
-                relative_path,
-                entry.size,
-            )
-            continue
-        candidates.append((entry, relative_path))
+    try:
+        result = await sbx.commands.run(find_cmd, timeout=10)
+        candidates: list[tuple[str, int]] = []
+        for line in result.stdout.splitlines():
+            if not line.strip():
+                continue
+            try:
+                relative_path, size_text = line.rsplit("\t", 1)
+                size = int(size_text)
+            except ValueError:
+                logger.warning("[%s] Skipping malformed extraction entry: %r", request_id, line)
+                continue
 
-    if not candidates:
-        logger.debug("[%s] No new files to extract", request_id)
-        return []
-
-    if len(candidates) > _MAX_EXTRACT_FILES:
-        logger.info(
-            "[%s] Capping file extraction at %d (found %d)",
-            request_id,
-            _MAX_EXTRACT_FILES,
-            len(candidates),
-        )
-        candidates = candidates[:_MAX_EXTRACT_FILES]
-
-    events: list[str] = []
-    total_size = 0
-    for entry, relative_path in candidates:
-        try:
-            data = await sbx.files.read(entry.path, format="bytes")
-            raw = data if isinstance(data, bytes) else bytes(data)
-            size = len(raw)
-
-            if total_size + size > _MAX_EXTRACT_TOTAL_SIZE:
-                logger.info("[%s] Total extraction size limit reached", request_id)
-                break
-
-            total_size += size
-            encoded = base64.b64encode(raw).decode("ascii")
-            events.append(
-                json.dumps(
-                    {
-                        "type": "file",
-                        "name": posixpath.basename(relative_path),
-                        "relative_path": relative_path,
-                        "path": entry.path,
-                        "size": size,
-                        "data": encoded,
-                    }
+            relative_path = _normalize_relative_path(relative_path)
+            if not relative_path or _has_hidden_segment(relative_path):
+                continue
+            if relative_path in input_paths:
+                continue
+            if size > _MAX_EXTRACT_FILE_SIZE:
+                logger.info(
+                    "[%s] Skipping oversized file: %s (%d bytes)",
+                    request_id,
+                    relative_path,
+                    size,
                 )
-            )
-            logger.info("[%s] Extracted file: %s (%d bytes)", request_id, relative_path, size)
-        except Exception:
-            logger.warning("[%s] Failed to read %s", request_id, relative_path, exc_info=True)
+                continue
+            candidates.append((relative_path, size))
 
-    return events
+        if not candidates:
+            logger.debug("[%s] No new files to extract", request_id)
+            return []
+
+        if len(candidates) > _MAX_EXTRACT_FILES:
+            logger.info(
+                "[%s] Capping file extraction at %d (found at least %d)",
+                request_id,
+                _MAX_EXTRACT_FILES,
+                len(candidates),
+            )
+            candidates = candidates[:_MAX_EXTRACT_FILES]
+
+        events: list[str] = []
+        total_size = 0
+        for relative_path, _reported_size in candidates:
+            path = posixpath.join(_SANDBOX_HOME, relative_path)
+            try:
+                data = await sbx.files.read(path, format="bytes")
+                raw = data if isinstance(data, bytes) else bytes(data)
+                size = len(raw)
+
+                if total_size + size > _MAX_EXTRACT_TOTAL_SIZE:
+                    logger.info("[%s] Total extraction size limit reached", request_id)
+                    break
+
+                total_size += size
+                encoded = base64.b64encode(raw).decode("ascii")
+                events.append(
+                    json.dumps(
+                        {
+                            "type": "file",
+                            "name": posixpath.basename(relative_path),
+                            "relative_path": relative_path,
+                            "path": path,
+                            "size": size,
+                            "data": encoded,
+                        }
+                    )
+                )
+                logger.info("[%s] Extracted file: %s (%d bytes)", request_id, relative_path, size)
+            except Exception:
+                logger.warning("[%s] Failed to read %s", request_id, relative_path, exc_info=True)
+
+        return events
+    finally:
+        with contextlib.suppress(Exception):
+            await sbx.commands.run(f"rm -f {shlex.quote(marker_path)}", timeout=5)

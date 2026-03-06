@@ -115,6 +115,10 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         logger.warning("sandstorm.json: timeout must be between 5 and 3600 — skipping")
         del validated["timeout"]
 
+    if "model" in validated and not validated["model"].strip():
+        logger.warning("sandstorm.json: model must be a non-empty string — skipping")
+        del validated["model"]
+
     return validated
 
 

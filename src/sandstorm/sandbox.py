@@ -15,7 +15,13 @@ from pathlib import Path
 from e2b import AsyncSandbox, NotFoundException
 
 from .config import _PROVIDER_ENV_KEYS, _build_agent_config, load_sandstorm_config
-from .files import _extract_generated_files, _load_skills_dir, _upload_files, _upload_skills
+from .files import (
+    _create_extraction_marker,
+    _extract_generated_files,
+    _load_skills_dir,
+    _upload_files,
+    _upload_skills,
+)
 from .models import QueryRequest
 from .telemetry import (
     get_tracer,
@@ -336,6 +342,12 @@ async def run_agent_in_sandbox(
                 ]
             )
 
+        extraction_marker = None
+        try:
+            extraction_marker = await _create_extraction_marker(sbx, request_id)
+        except Exception:
+            logger.warning("[%s] Failed to create extraction marker", request_id, exc_info=True)
+
         # Run the SDK query() via the runner script
         logger.info(
             "[%s] Starting agent (model=%s, max_turns=%s)",
@@ -389,12 +401,18 @@ async def run_agent_in_sandbox(
             )
 
         # Extract files created by the agent (sandbox still alive)
-        try:
-            generated = await _extract_generated_files(sbx, input_file_names, request_id)
-            for file_event in generated:
-                yield file_event
-        except Exception:
-            logger.warning("[%s] File extraction failed", request_id, exc_info=True)
+        if extraction_marker is not None:
+            try:
+                generated = await _extract_generated_files(
+                    sbx,
+                    input_file_names,
+                    request_id,
+                    extraction_marker,
+                )
+                for file_event in generated:
+                    yield file_event
+            except Exception:
+                logger.warning("[%s] File extraction failed", request_id, exc_info=True)
 
     finally:
         sandbox_stopped()
