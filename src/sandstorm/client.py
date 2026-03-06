@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from types import TracebackType
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import httpx
 
 
 @dataclass
@@ -46,7 +50,7 @@ class SandstormClient:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.timeout = timeout
-        self._client = None
+        self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> SandstormClient:
         import httpx

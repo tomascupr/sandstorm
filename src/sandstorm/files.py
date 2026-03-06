@@ -98,7 +98,20 @@ def _load_skills_dir(skills_dir: str) -> dict[str, dict[str, str]]:
             if file_path.name == ".DS_Store":
                 continue
             relative = file_path.relative_to(entry)
-            skill_files[str(relative)] = file_path.read_text()
+            try:
+                skill_files[str(relative)] = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                logger.warning(
+                    "skills_dir: skipping non-UTF-8 file %r in skill %r",
+                    str(relative),
+                    entry.name,
+                )
+        if "SKILL.md" not in skill_files:
+            logger.warning(
+                "skills_dir: skipping %r (SKILL.md is not readable as UTF-8)",
+                entry.name,
+            )
+            continue
         skills[entry.name] = skill_files
     return skills
 

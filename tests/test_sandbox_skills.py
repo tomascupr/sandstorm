@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import json
+import logging
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
 import pytest
@@ -107,6 +108,33 @@ class TestLoadSkillsDir:
 
         result = _load_skills_dir("skills")
         assert result == {"test-skill": {"SKILL.md": "content"}}
+
+    def test_skips_non_utf8_files(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.chdir(tmp_path)
+        skills_dir = tmp_path / "skills"
+        skill = skills_dir / "test-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_text("content")
+        (skill / "binary.dat").write_bytes(b"\xff\xfe\xfd")
+
+        with caplog.at_level(logging.WARNING, logger="sandstorm.files"):
+            result = _load_skills_dir("skills")
+
+        assert result == {"test-skill": {"SKILL.md": "content"}}
+        assert "skipping non-UTF-8 file 'binary.dat' in skill 'test-skill'" in caplog.text
+
+    def test_skips_skill_when_skill_md_is_non_utf8(self, tmp_path, monkeypatch, caplog):
+        monkeypatch.chdir(tmp_path)
+        skills_dir = tmp_path / "skills"
+        skill = skills_dir / "broken-skill"
+        skill.mkdir(parents=True)
+        (skill / "SKILL.md").write_bytes(b"\xff\xfe\xfd")
+
+        with caplog.at_level(logging.WARNING, logger="sandstorm.files"):
+            result = _load_skills_dir("skills")
+
+        assert result == {}
+        assert "skipping 'broken-skill' (SKILL.md is not readable as UTF-8)" in caplog.text
 
     def test_ignores_non_directories(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -579,7 +607,9 @@ class TestExtractGeneratedFiles:
 
     def test_total_size_budget(self):
         sbx = self._sbx()
-        # Each file is half the total budget + 1 byte, so only 1 fits
+        # Reported entry.size stays small here on purpose; the test verifies that the
+        # extraction budget still uses the actual bytes returned by sbx.files.read().
+        # Each returned payload is half the total budget + 1 byte, so only 1 fits.
         half_plus = _MAX_EXTRACT_TOTAL_SIZE // 2 + 1
         entries = [_make_entry("a.bin", size=100), _make_entry("b.bin", size=100)]
         sbx.files.list.return_value = entries
