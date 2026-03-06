@@ -141,9 +141,7 @@ async def _upload_skills(
             ) from exc
 
 
-async def _list_files_recursive(
-    sbx: AsyncSandbox, root_path: str
-) -> list[tuple[Any, str]]:
+async def _list_files_recursive(sbx: AsyncSandbox, root_path: str) -> list[tuple[Any, str]]:
     """Return all file entries below root_path with normalized relative paths."""
     stack = [root_path.rstrip("/")]
     seen_dirs: set[str] = set()

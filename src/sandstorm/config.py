@@ -3,6 +3,7 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from .models import NAME_PATTERN, QueryRequest
 
@@ -117,7 +118,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
     return validated
 
 
-def _first_defined(*values):
+def _first_defined(*values: Any) -> Any:
     """Return the first value that is not None."""
     for value in values:
         if value is not None:

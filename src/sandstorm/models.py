@@ -45,6 +45,7 @@ class QueryRequest(BaseModel):
     )
     model: str | None = Field(
         None,
+        min_length=1,
         description="Model override (e.g. 'sonnet', 'opus'). Overrides sandstorm.json.",
     )
     max_turns: int | None = Field(

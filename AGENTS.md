@@ -12,7 +12,7 @@ ds serve --reload                # run the FastAPI server locally
 uv run pytest tests/             # run the test suite
 ruff check src/ tests/           # lint
 ruff format --check src/ tests/  # formatting check
-uv run --with pyright pyright src/sandstorm/  # type check
+uv run pyright src/sandstorm/  # type check
 uv run python -c "from sandstorm.main import app"  # smoke-test imports
 ```
 

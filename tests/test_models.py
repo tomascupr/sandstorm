@@ -21,6 +21,16 @@ class TestPromptValidation:
             QueryRequest(prompt="")
 
 
+class TestModelValidation:
+    def test_valid_model(self):
+        req = QueryRequest(prompt="test", model="sonnet")
+        assert req.model == "sonnet"
+
+    def test_empty_model_rejected(self):
+        with pytest.raises(ValidationError, match="model"):
+            QueryRequest(prompt="test", model="")
+
+
 class TestApiKeyResolution:
     def test_falls_back_to_env_vars(self):
         req = QueryRequest(prompt="test")
