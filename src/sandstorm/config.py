@@ -152,7 +152,7 @@ def load_sandstorm_config() -> dict | None:
         return _config_cache
 
     try:
-        raw = json.loads(config_path.read_text())
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as exc:
         logger.error("sandstorm.json: failed to read — %s", exc)
         return None

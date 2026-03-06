@@ -144,7 +144,7 @@ class QueryRequest(BaseModel):
         safe = {}
         for path, content in v.items():
             normalized = normpath(path).lstrip("/")
-            if normalized.startswith("..") or normalized == ".":
+            if not normalized or normalized.startswith("..") or normalized == ".":
                 raise ValueError(f"Path traversal not allowed: {path}")
             safe[normalized] = content
         return safe

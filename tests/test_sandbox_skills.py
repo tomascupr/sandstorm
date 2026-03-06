@@ -2,11 +2,13 @@ import asyncio
 import base64
 import json
 import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from sandstorm.config import _build_agent_config, _validate_sandstorm_config
+import sandstorm.config as config_mod
+from sandstorm.config import _build_agent_config, _validate_sandstorm_config, load_sandstorm_config
 from sandstorm.files import (
     _MAX_EXTRACT_FILE_SIZE,
     _MAX_EXTRACT_FILES,
@@ -73,6 +75,24 @@ class TestValidateSandstormConfigSkills:
     def test_whitespace_model_dropped(self):
         config = _validate_sandstorm_config({"model": "   "})
         assert "model" not in config
+
+    def test_load_sandstorm_config_reads_utf8(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+        monkeypatch.setattr(config_mod, "_config_cache", None)
+        monkeypatch.setattr(config_mod, "_config_mtime", 0.0)
+
+        original_read_text = Path.read_text
+        seen: dict[str, str | None] = {}
+
+        def _read_text(self, *args, **kwargs):
+            seen["encoding"] = kwargs.get("encoding")
+            return original_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", _read_text)
+
+        assert load_sandstorm_config() == {"model": "sonnet"}
+        assert seen["encoding"] == "utf-8"
 
 
 class TestLoadSkillsDir:

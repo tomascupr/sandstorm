@@ -73,6 +73,10 @@ class TestFileValidation:
         with pytest.raises(ValidationError, match="Path traversal not allowed"):
             QueryRequest(prompt="test", files={"../etc/passwd": "evil"})
 
+    def test_root_path_rejected(self):
+        with pytest.raises(ValidationError, match="Path traversal not allowed"):
+            QueryRequest(prompt="test", files={"/": "evil"})
+
     def test_too_many_files_rejected(self):
         files = {f"file{i}.txt": "content" for i in range(21)}
         with pytest.raises(ValidationError, match="Too many files"):
