@@ -44,7 +44,6 @@ _PROVIDER_ENV_KEYS = [
 _MCP_ENV_VAR_PATTERN = re.compile(
     r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
 )
-_INITIAL_ENV_KEYS = frozenset(os.environ)
 _LOADED_DOTENV_VALUES: dict[str, str] = {}
 
 # ── mtime-based config cache ──────────────────────────────────────────────────
@@ -68,9 +67,7 @@ def _read_project_dotenv() -> dict[str, str]:
     env_path = _get_env_path()
     if not env_path.is_file():
         return {}
-    return {
-        key: value for key, value in dotenv_values(env_path).items() if value is not None
-    }
+    return {key: value for key, value in dotenv_values(env_path).items() if value is not None}
 
 
 def _refresh_project_dotenv() -> None:
@@ -80,14 +77,12 @@ def _refresh_project_dotenv() -> None:
     current = _read_project_dotenv()
 
     for key, previous in _LOADED_DOTENV_VALUES.items():
-        if key in _INITIAL_ENV_KEYS and key in os.environ:
-            continue
         if key not in current and os.environ.get(key) == previous:
             os.environ.pop(key, None)
 
     for key, value in current.items():
-        if key in _INITIAL_ENV_KEYS and key in os.environ:
-            continue
+        if key in os.environ and key not in _LOADED_DOTENV_VALUES:
+            continue  # Explicitly set outside .env — don't overwrite
         current_value = os.environ.get(key)
         previous_value = _LOADED_DOTENV_VALUES.get(key)
         if current_value is None or current_value == previous_value:
