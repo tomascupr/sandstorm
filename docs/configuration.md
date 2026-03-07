@@ -130,6 +130,9 @@ ds add linear
 `ds add` writes the MCP server entry into `sandstorm.json` for the current project and updates the
 required env vars in `.env` / `.env.example`.
 
+If the current project already defines a different MCP server block for that toolpack, `ds add`
+stops instead of overwriting it. Re-run with `--force` to replace only that MCP server entry.
+
 Use request-level whitelists such as `allowed_mcp_servers` to expose only a subset on a given call.
 
 Sandstorm resolves environment placeholders inside `mcp_servers` before the agent run starts.

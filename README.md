@@ -105,6 +105,9 @@ ds add linear
 `LINEAR_API_KEY=` to `.env.example`, and future CLI/API/Slack runs from that project expose the
 Linear MCP server in the sandboxed agent runtime.
 
+If the project already has a different `mcp_servers.linear` block, `ds add linear` stops instead
+of overwriting it. Re-run with `ds add linear --force` to replace that MCP server entry.
+
 ## Why Sandstorm exists
 
 Most agent projects break down in one of two ways:

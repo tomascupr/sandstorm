@@ -84,6 +84,33 @@ class TestCli:
         assert result.exit_code == 0
         assert seen["files"] == {"src/main.py": "print('hi')"}
 
+    def test_query_reports_missing_mcp_env_vars(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "mcp_servers": {
+                        "linear": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-linear"],
+                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["query", "inspect ticket"])
+
+        assert result.exit_code == 1
+        assert "mcp_servers.linear requires environment variable LINEAR_API_KEY" in result.output
+
     def test_init_list_shows_catalog(self, monkeypatch):
         _disable_dotenv(monkeypatch)
         runner = CliRunner()
@@ -360,6 +387,20 @@ class TestCli:
 
         assert result.exit_code == 0
         assert "installed" in result.output
+
+    def test_add_list_marks_customized_toolpack(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps({"mcp_servers": {"linear": {"command": "custom"}}}),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "--list"])
+
+        assert result.exit_code == 0
+        assert "customized (use --force)" in result.output
 
     def test_add_requires_project_config(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

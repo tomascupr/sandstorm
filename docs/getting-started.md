@@ -69,10 +69,10 @@ needed, writes it to `.env`, and adds `LINEAR_API_KEY=` to `.env.example`.
 
 Behavior:
 
-- `ds init` opens the guided flow
-- `ds init <starter>` scaffolds into `./<starter-slug>`
-- `ds init <starter> <directory>` scaffolds directly into the provided directory
-- `--force` overwrites starter-managed files in an existing destination
+- `ds add --list` shows bundled toolpacks plus whether each one is installed, not installed, or customized
+- `ds add <toolpack>` updates `sandstorm.json`, `.env`, and `.env.example` for the current project
+- If the project already defines a different MCP server block for that toolpack, the command stops
+- `ds add <toolpack> --force` replaces that toolpack's MCP server config and keeps other servers untouched
 
 ## Run one-off queries
 

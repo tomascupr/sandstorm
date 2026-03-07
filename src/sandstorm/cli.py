@@ -12,6 +12,7 @@ from pathlib import Path
 
 import click
 from dotenv import dotenv_values, load_dotenv, set_key
+from e2b import AuthenticationException, SandboxException
 
 from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
 from sandstorm.e2b_api import E2BApiError, webhook_request
@@ -153,7 +154,13 @@ def _toolpack_status(config: dict | None, toolpack: ToolpackDefinition) -> str:
     mcp_servers = config.get("mcp_servers")
     if not isinstance(mcp_servers, dict):
         return "not installed"
-    return "installed" if toolpack.mcp_server_name in mcp_servers else "not installed"
+    existing = mcp_servers.get(toolpack.mcp_server_name)
+    if existing is None:
+        return "not installed"
+    canonical = clone_mcp_server_config(toolpack)
+    if existing == canonical:
+        return "installed"
+    return "customized (use --force)"
 
 
 def _print_toolpack_list() -> None:
@@ -745,6 +752,9 @@ def query(
     except KeyboardInterrupt as exc:
         click.echo("Interrupted.", err=True)
         raise SystemExit(130) from exc
+    except (ValueError, RuntimeError, SandboxException, AuthenticationException) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
 
 
 # ── Webhook management ─────────────────────────────────────────────────────
