@@ -68,6 +68,8 @@ The final structured output is returned in the `result.structured_output` payloa
 ## Sub-agents
 
 Use `agents` to define specialists that the main agent can delegate to through the `Task` tool.
+This is separate from MCP integrations: external tool servers belong under `mcp_servers`, not
+`agents`.
 
 ```json
 {
@@ -119,7 +121,25 @@ Attach external tools with [Model Context Protocol](https://modelcontextprotocol
 }
 ```
 
+If you want a bundled integration, use the CLI instead of editing JSON by hand:
+
+```bash
+ds add linear
+```
+
+`ds add` writes the MCP server entry into `sandstorm.json` for the current project and updates the
+required env vars in `.env` / `.env.example`.
+
 Use request-level whitelists such as `allowed_mcp_servers` to expose only a subset on a given call.
+
+Sandstorm resolves environment placeholders inside `mcp_servers` before the agent run starts.
+Supported forms:
+
+- `${VAR_NAME}` for required env vars
+- `${VAR_NAME:-default}` for defaults when the host env var is unset
+
+This placeholder resolution applies to string values anywhere inside an MCP server config, such as
+`command`, `args`, `env`, `url`, and `headers`.
 
 ## Providers
 

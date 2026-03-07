@@ -325,6 +325,219 @@ class TestCli:
             "E2B_API_KEY=e2b-test-key",
         ]
 
+    def test_add_list_shows_toolpacks(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "--list"])
+
+        assert result.exit_code == 0
+        assert "linear" in result.output
+        assert "LINEAR_API_KEY" in result.output
+        assert "no project" in result.output
+
+    def test_add_list_marks_installed_toolpack(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "mcp_servers": {
+                        "linear": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-linear"],
+                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "--list"])
+
+        assert result.exit_code == 0
+        assert "installed" in result.output
+
+    def test_add_requires_project_config(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 1
+        assert "sandstorm.json not found" in result.output
+
+    def test_add_installs_linear_and_updates_env_files(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps({"model": "sonnet", "allowed_tools": ["Read"]}),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"], input="lin-api-key\n")
+
+        config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
+        env_lines = (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
+        env_example_lines = (tmp_path / ".env.example").read_text(encoding="utf-8").splitlines()
+
+        assert result.exit_code == 0
+        assert config["mcp_servers"]["linear"] == {
+            "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-linear"],
+            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+        }
+        assert config["allowed_tools"] == ["Read", "mcp__linear"]
+        assert env_lines == ["LINEAR_API_KEY='lin-api-key'"]
+        assert env_example_lines == ["LINEAR_API_KEY="]
+        assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
+
+    def test_add_persists_existing_shell_env_without_prompt(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+        prompted = False
+
+        def _prompt(*args, **kwargs):
+            nonlocal prompted
+            prompted = True
+            return "unexpected"
+
+        monkeypatch.setattr("sandstorm.cli.click.prompt", _prompt)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 0
+        assert prompted is False
+        assert "LINEAR_API_KEY='lin-api-key'" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+    def test_add_is_idempotent(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "mcp_servers": {
+                        "linear": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-linear"],
+                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        }
+                    },
+                    "allowed_tools": ["Read", "mcp__linear"],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 0
+        assert "already installed" in result.output
+
+    def test_add_preserves_project_env_over_shell_env(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "shell-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "mcp_servers": {
+                        "linear": {
+                            "command": "npx",
+                            "args": ["-y", "@modelcontextprotocol/server-linear"],
+                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                        }
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / ".env").write_text("LINEAR_API_KEY='project-key'\n", encoding="utf-8")
+        prompted = False
+
+        def _prompt(*args, **kwargs):
+            nonlocal prompted
+            prompted = True
+            return "unexpected"
+
+        monkeypatch.setattr("sandstorm.cli.click.prompt", _prompt)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 0
+        assert prompted is False
+        assert (tmp_path / ".env").read_text(encoding="utf-8").splitlines() == [
+            "LINEAR_API_KEY='project-key'"
+        ]
+
+    def test_add_rejects_conflicting_toolpack_without_force(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps({"mcp_servers": {"linear": {"command": "custom"}}}),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 1
+        assert "Use --force to overwrite it" in result.output
+
+    def test_add_force_overwrites_only_toolpack_server(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "mcp_servers": {
+                        "linear": {"command": "custom"},
+                        "github": {"command": "other"},
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear", "--force"])
+
+        config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
+
+        assert result.exit_code == 0
+        assert config["mcp_servers"]["linear"]["command"] == "npx"
+        assert config["mcp_servers"]["github"] == {"command": "other"}
+
+    def test_add_rejects_invalid_allowed_tools_shape(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("LINEAR_API_KEY", "lin-api-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps({"allowed_tools": "Read"}),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", "linear"])
+
+        assert result.exit_code == 1
+        assert "allowed_tools" in result.output
+
     def test_webhook_register_rejects_non_http_url(self, monkeypatch):
         monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
         _disable_dotenv(monkeypatch)

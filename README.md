@@ -47,6 +47,7 @@ its work, and tears itself down when the run is done.
 pip install duvo-sandstorm
 ds init
 cd general-assistant
+ds add linear
 ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
@@ -90,6 +91,19 @@ pip install "duvo-sandstorm[telemetry]"   # OpenTelemetry integration
 | `security-audit` | Run a structured security review | vulnerability report with remediation steps | - |
 
 Need CRM access, ticket systems, or internal APIs? Add custom tools to the sandbox.
+
+## Add toolpacks
+
+Use `ds add` to install bundled MCP integrations into the current project:
+
+```bash
+ds add --list
+ds add linear
+```
+
+`ds add linear` updates `sandstorm.json`, writes `LINEAR_API_KEY` to `.env`, adds
+`LINEAR_API_KEY=` to `.env.example`, and future CLI/API/Slack runs from that project expose the
+Linear MCP server in the sandboxed agent runtime.
 
 ## Why Sandstorm exists
 

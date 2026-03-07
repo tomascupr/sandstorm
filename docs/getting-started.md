@@ -8,6 +8,7 @@ Sandstorm gives you a fast path from install to a runnable agent project.
 pip install duvo-sandstorm
 ds init
 cd general-assistant
+ds add linear
 ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
@@ -53,6 +54,18 @@ ds init research-brief
 ds init security-audit my-audit
 ds init support-triage --force
 ```
+
+## Add a bundled toolpack
+
+Install bundled MCP integrations into the current project:
+
+```bash
+ds add --list
+ds add linear
+```
+
+`ds add linear` updates the current project's `sandstorm.json`, prompts for `LINEAR_API_KEY` when
+needed, writes it to `.env`, and adds `LINEAR_API_KEY=` to `.env.example`.
 
 Behavior:
 

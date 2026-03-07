@@ -2,8 +2,12 @@
 
 import json
 import logging
+import os
+import re
 from pathlib import Path
 from typing import Any
+
+from dotenv import dotenv_values
 
 from .models import NAME_PATTERN, QueryRequest
 
@@ -35,9 +39,13 @@ _PROVIDER_ENV_KEYS = [
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    # MCP server credentials
-    "LINEAR_API_KEY",
 ]
+
+_MCP_ENV_VAR_PATTERN = re.compile(
+    r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
+)
+_INITIAL_ENV_KEYS = frozenset(os.environ)
+_LOADED_DOTENV_VALUES: dict[str, str] = {}
 
 # ── mtime-based config cache ──────────────────────────────────────────────────
 
@@ -48,6 +56,44 @@ _config_mtime: float = 0.0
 def _get_config_path() -> Path:
     """Resolve sandstorm.json from the current working directory."""
     return Path.cwd() / "sandstorm.json"
+
+
+def _get_env_path() -> Path:
+    """Resolve the project-local .env from the current working directory."""
+    return Path.cwd() / ".env"
+
+
+def _read_project_dotenv() -> dict[str, str]:
+    """Read the current project .env file without mutating process env."""
+    env_path = _get_env_path()
+    if not env_path.is_file():
+        return {}
+    return {
+        key: value for key, value in dotenv_values(env_path).items() if value is not None
+    }
+
+
+def _refresh_project_dotenv() -> None:
+    """Hot-reload project .env values while preserving explicit process env vars."""
+    global _LOADED_DOTENV_VALUES
+
+    current = _read_project_dotenv()
+
+    for key, previous in _LOADED_DOTENV_VALUES.items():
+        if key in _INITIAL_ENV_KEYS and key in os.environ:
+            continue
+        if key not in current and os.environ.get(key) == previous:
+            os.environ.pop(key, None)
+
+    for key, value in current.items():
+        if key in _INITIAL_ENV_KEYS and key in os.environ:
+            continue
+        current_value = os.environ.get(key)
+        previous_value = _LOADED_DOTENV_VALUES.get(key)
+        if current_value is None or current_value == previous_value:
+            os.environ[key] = value
+
+    _LOADED_DOTENV_VALUES = current
 
 
 def _validate_sandstorm_config(raw: dict) -> dict:
@@ -130,6 +176,40 @@ def _first_defined(*values: Any) -> Any:
     return None
 
 
+def _resolve_mcp_placeholders(value: Any, server_name: str) -> Any:
+    """Resolve ${VAR} and ${VAR:-default} placeholders inside MCP config values."""
+    if isinstance(value, dict):
+        return {key: _resolve_mcp_placeholders(item, server_name) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve_mcp_placeholders(item, server_name) for item in value]
+    if not isinstance(value, str):
+        return value
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("name")
+        default = match.group("default")
+        resolved = os.environ.get(name)
+        if resolved is not None:
+            return resolved
+        if default is not None:
+            return default
+        raise ValueError(
+            f"mcp_servers.{server_name} requires environment variable {name} to be set"
+        )
+
+    return _MCP_ENV_VAR_PATTERN.sub(replace, value)
+
+
+def _resolve_mcp_servers(mcp_servers: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Resolve env placeholders in effective MCP server definitions."""
+    if mcp_servers is None:
+        return None
+    return {
+        server_name: _resolve_mcp_placeholders(server_config, server_name)
+        for server_name, server_config in mcp_servers.items()
+    }
+
+
 def load_sandstorm_config() -> dict | None:
     """Load sandstorm.json from the project root if it exists.
 
@@ -195,6 +275,8 @@ def _build_agent_config(
     if mcp_servers is not None and request.allowed_mcp_servers is not None:
         allowed = set(request.allowed_mcp_servers)
         mcp_servers = {k: v for k, v in mcp_servers.items() if k in allowed}
+    _refresh_project_dotenv()
+    mcp_servers = _resolve_mcp_servers(mcp_servers)
 
     # Merge extra agents first, then apply whitelist to combined result
     agents_config = sandstorm_config.get("agents")
