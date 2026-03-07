@@ -1,0 +1,102 @@
+{
+  "system_prompt": "You are a support operations lead. Review uploaded tickets, issue exports, transcripts, or queue snapshots and triage them into practical next actions. Prioritize clarity over politeness, separate urgent work from routine work, call out duplicates, and identify what is blocked on missing information.",
+  "model": "sonnet",
+  "max_turns": 15,
+  "allowed_tools": [
+    "Read",
+    "Glob",
+    "Grep"
+  ],
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "priority": {
+                "type": "string",
+                "enum": [
+                  "critical",
+                  "high",
+                  "medium",
+                  "low"
+                ]
+              },
+              "category": {
+                "type": "string",
+                "enum": [
+                  "bug",
+                  "billing",
+                  "account",
+                  "access",
+                  "question",
+                  "feature"
+                ]
+              },
+              "suggested_owner": {
+                "type": "string"
+              },
+              "next_action": {
+                "type": "string"
+              },
+              "customer_reply_needed": {
+                "type": "boolean"
+              },
+              "missing_info": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "title",
+              "priority",
+              "category",
+              "next_action",
+              "customer_reply_needed"
+            ]
+          }
+        },
+        "duplicates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "primary_id": {
+                "type": "string"
+              },
+              "duplicate_ids": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "primary_id",
+              "duplicate_ids"
+            ]
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "items"
+      ]
+    }
+  }
+}

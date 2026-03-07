@@ -15,6 +15,18 @@ from dotenv import load_dotenv
 
 from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
 from sandstorm.e2b_api import E2BApiError, webhook_request
+from sandstorm.starter_catalog import (
+    StarterDefinition,
+    list_starters,
+    resolve_starter,
+    scaffold_files,
+)
+
+_MODEL_OVERRIDE_ENV_KEYS = (
+    "ANTHROPIC_DEFAULT_SONNET_MODEL",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+)
 
 
 class _DefaultQueryGroup(click.Group):
@@ -61,6 +73,266 @@ def _print_event(line: str) -> None:
         click.echo(f"Error: {event.get('error', 'unknown')}", err=True)
 
 
+def _print_starter_list() -> None:
+    """Print the bundled starter catalog."""
+    click.echo("Available starters:\n")
+    for starter in list_starters():
+        click.echo(f"  {starter.slug:18s} {starter.description}")
+        if starter.aliases:
+            click.echo(f"  {'aliases:':18s} {', '.join(starter.aliases)}")
+        click.echo()
+
+
+def _prompt_for_starter() -> StarterDefinition:
+    """Interactively choose a starter from the catalog."""
+    _print_starter_list()
+    starter_name = click.prompt(
+        "Starter",
+        type=click.Choice([starter.slug for starter in list_starters()], case_sensitive=False),
+        default="general-assistant",
+        show_choices=False,
+    )
+    return resolve_starter(starter_name)
+
+
+def _is_empty_directory(path: Path) -> bool:
+    return path.is_dir() and not any(path.iterdir())
+
+
+def _suggest_destination(default_path: Path) -> Path:
+    """Return the first available sibling destination."""
+    for suffix in range(2, 100):
+        candidate = default_path.with_name(f"{default_path.name}-{suffix}")
+        if not candidate.exists():
+            return candidate
+    raise click.ClickException(f"Could not find an available directory name near {default_path}.")
+
+
+def _prompt_for_destination(default_path: Path) -> Path:
+    """Prompt until the user chooses a writable destination."""
+    click.echo(
+        f"Default destination {default_path} already exists and is not empty."
+        " Choose a different directory."
+    )
+    suggestion = _suggest_destination(default_path)
+    while True:
+        raw_value = click.prompt("Destination directory", default=str(suggestion))
+        destination = Path(raw_value).expanduser()
+        if not destination.exists() or _is_empty_directory(destination):
+            return destination
+        click.echo(
+            f"{destination} already exists and is not empty. Choose a different directory.",
+            err=True,
+        )
+
+
+def _validate_existing_destination(destination: Path, force: bool) -> None:
+    """Validate the destination root before any writes happen."""
+    if destination.exists() and not destination.is_dir():
+        raise click.ClickException(f"Destination {destination} exists and is not a directory.")
+    if destination.exists() and not _is_empty_directory(destination) and not force:
+        raise click.ClickException(
+            f"Destination {destination} already exists and is not empty. "
+            "Use --force to overwrite starter-managed files."
+        )
+
+
+def _resolve_scaffold_target(destination: Path, relative_path: str) -> Path:
+    """Resolve a scaffold target and ensure it stays within the destination root."""
+    destination_root = destination.resolve()
+    target = (destination_root / relative_path).resolve()
+    if not target.is_relative_to(destination_root):
+        raise click.ClickException(
+            f"Refusing to write {relative_path}: resolves outside {destination}."
+        )
+    return target
+
+
+def _validate_scaffold_targets(destination: Path, files: dict[str, str], force: bool) -> None:
+    """Validate target paths so scaffolding does not partially write files."""
+    required_dirs = {destination.resolve()}
+    for relative_path in files:
+        required_dirs.add(_resolve_scaffold_target(destination, relative_path).parent)
+
+    for directory in sorted(required_dirs):
+        current = directory
+        while True:
+            if current.exists():
+                if not current.is_dir():
+                    raise click.ClickException(
+                        f"Cannot create {directory}: {current} exists and is not a directory."
+                    )
+                break
+            if current == current.parent:
+                break
+            current = current.parent
+
+    for relative_path in sorted(files):
+        target = _resolve_scaffold_target(destination, relative_path)
+        if target.exists() and target.is_dir():
+            raise click.ClickException(f"Cannot overwrite directory {target} with a file.")
+        if target.exists() and not force:
+            raise click.ClickException(
+                f"Target {target} already exists. Use --force to overwrite starter-managed files."
+            )
+
+
+def _write_scaffold(destination: Path, files: dict[str, str]) -> None:
+    """Write starter files into the destination directory."""
+    destination.mkdir(parents=True, exist_ok=True)
+    for relative_path, content in sorted(files.items()):
+        target = _resolve_scaffold_target(destination, relative_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _get_env_value(name: str) -> str:
+    """Return a trimmed environment value or an empty string."""
+    return os.environ.get(name, "").strip()
+
+
+def _copy_env_values(values: dict[str, str], *names: str) -> None:
+    """Copy present environment values into the target mapping."""
+    for name in names:
+        value = _get_env_value(name)
+        if value:
+            values[name] = value
+
+
+def _resolve_init_env_values() -> tuple[dict[str, str], list[str]]:
+    """Resolve provider-specific env vars for `ds init`."""
+    values: dict[str, str] = {}
+    missing: list[str] = []
+
+    e2b_api_key = _get_env_value("E2B_API_KEY")
+    if e2b_api_key:
+        values["E2B_API_KEY"] = e2b_api_key
+    else:
+        missing.append("E2B_API_KEY")
+
+    if _get_env_value("CLAUDE_CODE_USE_VERTEX"):
+        _copy_env_values(
+            values,
+            "CLAUDE_CODE_USE_VERTEX",
+            "CLOUD_ML_REGION",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        )
+        for name in (
+            "CLOUD_ML_REGION",
+            "ANTHROPIC_VERTEX_PROJECT_ID",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        ):
+            if name not in values:
+                missing.append(name)
+        return values, missing
+
+    if _get_env_value("CLAUDE_CODE_USE_BEDROCK"):
+        _copy_env_values(
+            values,
+            "CLAUDE_CODE_USE_BEDROCK",
+            "AWS_REGION",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+        )
+        for name in ("AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+            if name not in values:
+                missing.append(name)
+        return values, missing
+
+    if _get_env_value("CLAUDE_CODE_USE_FOUNDRY"):
+        _copy_env_values(
+            values,
+            "CLAUDE_CODE_USE_FOUNDRY",
+            "AZURE_FOUNDRY_RESOURCE",
+            "AZURE_API_KEY",
+        )
+        for name in ("AZURE_FOUNDRY_RESOURCE", "AZURE_API_KEY"):
+            if name not in values:
+                missing.append(name)
+        return values, missing
+
+    base_url = _get_env_value("ANTHROPIC_BASE_URL")
+    openrouter_api_key = _get_env_value("OPENROUTER_API_KEY")
+    if openrouter_api_key or "openrouter.ai" in base_url:
+        values["ANTHROPIC_BASE_URL"] = base_url or "https://openrouter.ai/api"
+        _copy_env_values(values, "OPENROUTER_API_KEY", *_MODEL_OVERRIDE_ENV_KEYS)
+        if "OPENROUTER_API_KEY" not in values:
+            missing.append("OPENROUTER_API_KEY")
+        return values, missing
+
+    if base_url:
+        values["ANTHROPIC_BASE_URL"] = base_url
+        _copy_env_values(
+            values, "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", *_MODEL_OVERRIDE_ENV_KEYS
+        )
+        if "ANTHROPIC_AUTH_TOKEN" not in values and "ANTHROPIC_API_KEY" not in values:
+            missing.append("ANTHROPIC_AUTH_TOKEN")
+        return values, missing
+
+    anthropic_api_key = _get_env_value("ANTHROPIC_API_KEY")
+    if anthropic_api_key:
+        values["ANTHROPIC_API_KEY"] = anthropic_api_key
+    else:
+        missing.append("ANTHROPIC_API_KEY")
+    return values, missing
+
+
+def _missing_env_names(env_values: dict[str, str], required_names: list[str]) -> list[str]:
+    """Return required env names that are still unset after prompting."""
+    return [name for name in required_names if not env_values.get(name)]
+
+
+def _maybe_prompt_for_env_file(destination: Path) -> tuple[bool, list[str]]:
+    """Prompt for missing provider settings and optionally write .env."""
+    env_path = destination / ".env"
+    if env_path.exists():
+        click.echo("Skipped .env setup because the destination already has a .env file.")
+        return False, []
+
+    env_values, missing = _resolve_init_env_values()
+    if not missing:
+        return False, []
+
+    click.echo("\nAdd the missing provider settings so this starter is runnable right away.\n")
+    prompt_names = [name for name in missing if name != "E2B_API_KEY"]
+    if "E2B_API_KEY" in missing:
+        prompt_names.append("E2B_API_KEY")
+    for name in prompt_names:
+        env_values[name] = click.prompt(name, type=str).strip()
+
+    remaining_missing = _missing_env_names(env_values, missing)
+    if remaining_missing:
+        click.echo(
+            "Skipped .env setup because some required provider settings were left blank.",
+            err=True,
+        )
+        return False, remaining_missing
+
+    env_lines = [f"{name}={value}" for name, value in env_values.items() if value]
+    if not env_lines:
+        return False, missing
+    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+    env_path.chmod(0o600)
+    return True, []
+
+
+def _print_init_next_steps(
+    destination: Path, starter: StarterDefinition, env_written: bool, missing: list[str]
+) -> None:
+    """Print concise next steps after scaffolding."""
+    click.echo(f"\nInitialized {starter.slug} in {destination}.")
+    if env_written:
+        click.echo("Wrote .env with your provider settings.")
+    elif missing:
+        click.echo("Fill in .env.example or create a .env with: " + ", ".join(missing) + ".")
+
+    click.echo("\nNext steps:")
+    click.echo(f"  cd {destination}")
+    click.echo(f"  {starter.next_step_command}")
+
+
 @click.group(cls=_DefaultQueryGroup)
 @click.version_option(version=__version__, prog_name="sandstorm")
 def cli() -> None:
@@ -78,6 +350,72 @@ def serve(host: str, port: int, reload: bool) -> None:
     import uvicorn
 
     uvicorn.run("sandstorm.main:app", host=host, port=port, reload=reload)
+
+
+@cli.command()
+@click.argument("starter_name", required=False)
+@click.argument("directory", required=False, type=click.Path(path_type=Path))
+@click.option("--list", "show_list", is_flag=True, help="List available starters.")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite starter-managed files when the destination already exists.",
+)
+def init(starter_name: str | None, directory: Path | None, show_list: bool, force: bool) -> None:
+    """Scaffold a starter project with sandstorm.json and companion files."""
+    load_dotenv()
+
+    if show_list:
+        if starter_name or directory is not None:
+            raise click.UsageError("--list cannot be combined with starter arguments.")
+        _print_starter_list()
+        return
+
+    interactive = starter_name is None
+    if interactive:
+        starter = _prompt_for_starter()
+    else:
+        try:
+            starter = resolve_starter(starter_name or "")
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="starter") from exc
+    default_destination = Path(starter.slug)
+
+    if directory is not None:
+        destination = directory.expanduser()
+    elif interactive:
+        destination = (
+            default_destination
+            if (
+                force
+                or not default_destination.exists()
+                or _is_empty_directory(default_destination)
+            )
+            else _prompt_for_destination(default_destination)
+        )
+    else:
+        destination = default_destination
+
+    focus_sentence = None
+    if interactive:
+        focus_sentence = click.prompt(
+            "What should this agent help with?",
+            default="",
+            show_default=False,
+        ).strip()
+
+    scaffold = scaffold_files(starter, focus_sentence)
+    _validate_existing_destination(destination, force)
+    _validate_scaffold_targets(destination, scaffold, force)
+    _write_scaffold(destination, scaffold)
+    if interactive:
+        env_written, missing = _maybe_prompt_for_env_file(destination)
+    elif (destination / ".env").exists():
+        env_written, missing = False, []
+    else:
+        env_written = False
+        _, missing = _resolve_init_env_values()
+    _print_init_next_steps(destination, starter, env_written, missing)
 
 
 @cli.command()

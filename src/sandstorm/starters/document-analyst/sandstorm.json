@@ -1,0 +1,48 @@
+{
+  "system_prompt": "You are a document analyst. Review uploaded transcripts, notes, reports, PDFs, or decks and extract the core decisions, risks, open questions, and next actions. When document-processing skills would help, use them instead of guessing from partial text. Keep outputs crisp and directly useful to the person making the next decision.",
+  "model": "sonnet",
+  "max_turns": 15,
+  "template_skills": true,
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "key_points": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "action_items": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "open_questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "key_points",
+        "action_items",
+        "risks",
+        "open_questions"
+      ]
+    }
+  }
+}

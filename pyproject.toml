@@ -1,7 +1,7 @@
 [project]
 name = "duvo-sandstorm"
 version = "0.7.1"
-description = "Run Claude agents in secure cloud sandboxes — via API, CLI, or Slack. One call. Full agent. Zero infrastructure."
+description = "Open-source runtime for general-purpose AI agents in isolated sandboxes."
 keywords = ["ai-agents", "anthropic", "claude", "e2b", "fastapi", "openrouter", "sandbox", "slack"]
 readme = "README.md"
 license = "MIT"
@@ -57,7 +57,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/sandstorm"]
-artifacts = ["src/sandstorm/runner.mjs", "src/sandstorm/slack-manifest.yaml"]
+artifacts = [
+    "src/sandstorm/runner.mjs",
+    "src/sandstorm/slack-manifest.yaml",
+    "src/sandstorm/starters/**/*",
+]
 
 [project.scripts]
 duvo-sandstorm = "sandstorm.cli:cli"

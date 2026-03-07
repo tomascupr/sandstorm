@@ -1,68 +1,46 @@
-# Examples
+# Advanced examples
 
-Ready-to-use `sandstorm.json` configs for common use cases. Each example is a self-contained
-directory: `cd` into it, run `ds "<prompt>"`, and adjust the prompt or schema to fit your
-workflow.
+Start with `ds init` for the default onboarding path. The examples in this directory are more
+opinionated patterns you can borrow once you want a tighter workflow than the starter catalog.
 
-## Fastest Starters
+## Starter map
+
+| If you want to start with... | Use `ds init` | Then look at these advanced examples |
+|------------------------------|---------------|--------------------------------------|
+| A flexible general-purpose agent | `general-assistant` | `code-reviewer`, `repo-migration` |
+| Research briefs and market scans | `research-brief` | `competitive-analysis`, `content-brief` |
+| Document analysis and extraction | `document-analyst` | - |
+| Support or issue queue triage | `support-triage` | `issue-triage` |
+| API extraction from docs | `api-extractor` | `docs-to-openapi` |
+| Security reviews | `security-audit` | `security-auditor` |
+
+## Advanced patterns
+
+| Example | When to use it | Key features |
+|---------|----------------|--------------|
+| [Competitive Analysis](competitive-analysis/) | Research competitors with a more opinionated market-analysis schema | `output_format`, WebFetch, WebSearch |
+| [Content Brief](content-brief/) | Generate a search-driven content brief | `output_format`, WebSearch |
+| [Issue Triage](issue-triage/) | Triage uploaded issue exports with a stricter engineering rubric | `output_format`, `allowed_tools`, file uploads |
+| [Code Reviewer](code-reviewer/) | Produce a structured code-review report with severity and fixes | `output_format`, `allowed_tools`, file uploads |
+| [Repo Migration](repo-migration/) | Plan a staged migration without write access | `output_format`, `allowed_tools`, file uploads |
+| [Docs to OpenAPI](docs-to-openapi/) | Crawl docs and generate a draft OpenAPI spec | `output_format`, WebFetch, Write |
+| [Security Auditor](security-auditor/) | Run a multi-agent audit with an OWASP skill baked into the project | `agents`, `skills_dir`, `allowed_tools` |
+
+## Typical workflow
 
 ```bash
 pip install duvo-sandstorm
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
+ds init research-brief
 
+# When you need a narrower pattern, switch to an advanced example
 cd examples/competitive-analysis
-ds "Compare Notion, Coda, and Slite for async product teams"
+ds "Compare Vercel, Netlify, and Cloudflare Pages as deployment platforms"
 ```
 
-If you only try three examples first, use these:
+## Make your own
 
-- [Competitive Analysis](competitive-analysis/) for live web research
-- [Content Brief](content-brief/) for search-driven content planning
-- [Issue Triage](issue-triage/) for uploaded reports, tickets, and transcripts
+1. Start with the closest `ds init` starter.
+2. Tighten the prompt, schema, or tool budget for your use case.
+3. Add skills or sub-agents only when the workflow really needs them.
 
-## Pick A Starting Point
-
-| Example | Best when you want to | Key features |
-|---------|------------------------|--------------|
-| [Competitive Analysis](competitive-analysis/) | Compare competitors using live web research | `output_format`, WebFetch, WebSearch |
-| [Content Brief](content-brief/) | Build an SEO/content brief from search results | `output_format`, WebSearch |
-| [Issue Triage](issue-triage/) | Classify and prioritize uploaded reports, tickets, or transcripts | `output_format`, `allowed_tools`, file uploads |
-| [Code Reviewer](code-reviewer/) | Review uploaded code with a strict JSON report | `output_format`, `allowed_tools`, file uploads |
-| [Repo Migration](repo-migration/) | Plan a staged migration for a repo or service | `output_format`, `allowed_tools`, file uploads |
-| [Docs to OpenAPI](docs-to-openapi/) | Crawl docs and extract endpoints into a draft spec | `output_format`, WebFetch, Write |
-| [Security Auditor](security-auditor/) | Run a multi-agent security audit with skills | `agents`, `skills_dir`, `allowed_tools` |
-
-## How Examples Work
-
-Each example directory contains:
-
-- **`sandstorm.json`** — the agent configuration (system prompt, output format, tools, etc.)
-- **`README.md`** — usage guide with example prompts and sample output
-
-When you run `ds` from an example directory, Sandstorm loads the local `sandstorm.json` automatically. No code changes needed — just `cd` and run.
-
-## Typical Commands
-
-```bash
-# Research competitors
-cd examples/competitive-analysis
-ds "Compare Notion, Coda, and Slite for async product teams"
-
-# Build a content brief
-cd examples/content-brief
-ds "Create a content brief for a blog post about AI support automation"
-
-# Triage uploaded issues
-cd examples/issue-triage
-ds "Triage these support tickets for severity and next action" -f /path/to/issues.json
-```
-
-## Creating Your Own
-
-1. Create a new directory with a `sandstorm.json`
-2. Start with one of the examples above as a template
-3. Customize the `system_prompt`, `output_format`, and other fields
-4. Run `ds "your prompt"` to test
-
-See the [Configuration](../README.md#configuration) section in the main README for all available fields.
+See [docs/configuration.md](../docs/configuration.md) for the full config reference.

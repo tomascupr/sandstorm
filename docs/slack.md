@@ -104,7 +104,7 @@ Sandstorm: [sees prior context, updates the output]
 | `E2B_API_KEY` | Yes | -- | E2B sandbox API key |
 | `OPENROUTER_API_KEY` | No | -- | OpenRouter key (if using OpenRouter) |
 
-*Or equivalent provider key — see the main README for [provider setup](../README.md#providers).
+*Or equivalent provider key — see [configuration](configuration.md#providers) for provider setup.
 
 ### sandstorm.json
 

@@ -1,0 +1,58 @@
+{
+  "system_prompt": "You are a research analyst. Investigate the user's topic using current sources, compare the relevant options, and return a concise brief that supports a decision. Cite concrete evidence from the sources you inspect instead of relying on generic prior knowledge. Call out uncertainty, missing data, and tradeoffs directly.",
+  "model": "sonnet",
+  "max_turns": 20,
+  "output_format": {
+    "type": "json_schema",
+    "schema": {
+      "type": "object",
+      "properties": {
+        "summary": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string"
+        },
+        "key_findings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "notes": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url"
+            ]
+          }
+        }
+      },
+      "required": [
+        "summary",
+        "key_findings",
+        "recommendations",
+        "sources"
+      ]
+    }
+  }
+}

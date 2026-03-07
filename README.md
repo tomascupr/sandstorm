@@ -1,667 +1,122 @@
-# Duvo.ai Sandstorm
+# Sandstorm
 
-Run full AI agents in secure cloud sandboxes. One command. Zero runner boilerplate.
+Open-source runtime for general-purpose AI agents in isolated sandboxes.
+
+CLI, API, and Slack with streaming, file uploads, and config-driven behavior.
+
+Built on the Claude Agent SDK and E2B.
 
 [![CI](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml)
-[![Claude Agent SDK](https://img.shields.io/badge/Claude_Agent_SDK-black?logo=anthropic)](https://platform.claude.com/docs/en/agent-sdk/overview)
-[![E2B](https://img.shields.io/badge/E2B-sandboxed-ff8800.svg)](https://e2b.dev)
-[![OpenRouter](https://img.shields.io/badge/OpenRouter-300%2B_models-6366f1.svg)](https://openrouter.ai)
 [![PyPI](https://img.shields.io/pypi/v/duvo-sandstorm.svg)](https://pypi.org/project/duvo-sandstorm/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ![Sandstorm live run and dashboard](docs/assets/sandstorm-demo.svg)
 
-Sandstorm is a general-purpose agent runtime built on the Claude Agent SDK. It gives you Bash,
-file access, SSE streaming, structured output, and teardown-by-default isolation without making
-you build the runner yourself. Give it a prompt or API request, it spins up a fresh E2B VM,
-streams every step back, and destroys the sandbox when the task is done.
+Sandstorm is for people who want real agent work, not a chat wrapper:
 
-## Best Fit
+- Compare competitors and write a brief
+- Analyze uploaded transcripts or PDFs
+- Triage incoming support tickets
+- Crawl docs and draft an API spec
+- Run a security audit
 
-- You want an API or CLI for real agent work, not just chat completions
-- You need isolation, file uploads, structured output, or Slack handoff without building the
-  runner yourself
-- You want to configure behavior with `sandstorm.json` instead of wiring orchestration code
-- Your tasks span research, content, support, docs, operations, or coding work
+## Terminal demo
 
-## Not For
+```bash
+$ pip install duvo-sandstorm
+$ ds init research-brief
+$ cd research-brief
+$ ds "Compare Linear, Jira, and Asana for a 50-person product org"
 
-- You need long-lived shared application state across runs
-- You want cluster-wide dashboard history or shared Slack sandbox reuse today
-- You need a full browser UI product out of the box rather than an agent runtime
+summary: Linear is the best fit for speed and usability, Jira wins on configurability,
+and Asana is the easiest cross-functional rollout.
+recommendations:
+  - Pick Linear for a product-led team that values velocity.
+  - Pick Jira if workflow customization is the top priority.
+  - Keep Asana for broader non-engineering coordination.
+sources:
+  - linear.app
+  - atlassian.com/software/jira
+  - asana.com
+```
 
-## Try It In 60 Seconds
+The point is not just that an agent can answer. It starts from a runnable starter, gets a fresh
+sandbox, can read files or use the web, streams its work, and tears itself down when the run is done.
+
+## 60-second path
 
 ```bash
 pip install duvo-sandstorm
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
+ds init
+cd general-assistant
 ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
-If you want a more opinionated starting point, jump straight to [examples/](examples/):
+`ds init` scaffolds a runnable starter with `sandstorm.json`, a starter README, `.env.example`,
+and any starter-specific assets. If provider settings are missing, the guided flow asks once and
+writes `.env` for you.
 
-- [Competitive Analysis](examples/competitive-analysis/) for research across live websites
-- [Content Brief](examples/content-brief/) for search-driven writing briefs
-- [Issue Triage](examples/issue-triage/) for classifying uploaded reports or tickets
+Direct forms:
 
-## Why Not Just Wire The SDK Yourself?
+```bash
+ds init --list
+ds init research-brief
+ds init security-audit my-audit
+```
 
-| Capability | Sandstorm | Raw Agent SDK + E2B | DIY runner |
-|------------|-----------|---------------------|------------|
+## Pick a starter
+
+| Starter | Use it when you want to | Typical output | Aliases |
+|---------|--------------------------|----------------|---------|
+| `general-assistant` | Start with one flexible agent for mixed workflows | concise answer, plan, or artifact | - |
+| `research-brief` | Research a topic, compare options, and support a decision | brief with findings, recommendations, and sources | `competitive-analysis` |
+| `document-analyst` | Review transcripts, reports, PDFs, or decks | summary, risks, action items, open questions | - |
+| `support-triage` | Triage support tickets or issue exports | prioritized queue with owners and next steps | `issue-triage` |
+| `api-extractor` | Crawl docs and draft an API summary plus spec | endpoint summary and draft `openapi.yaml` | `docs-to-openapi` |
+| `security-audit` | Run a structured security review | vulnerability report with remediation steps | - |
+
+## Why Sandstorm exists
+
+Most agent projects break down in one of two ways:
+
+- You wire the SDK yourself and end up rebuilding sandbox lifecycle, file uploads, streaming,
+  config loading, and starter setup.
+- You use an agent framework that is good at orchestration but weak at actually shipping a
+  runnable agent product path.
+
+Sandstorm is opinionated about the missing middle:
+
+- starter to runnable project in one command
+- fresh sandbox per request with teardown by default
+- CLI, API, and Slack over the same runtime
+- config-driven behavior through `sandstorm.json`
+- built-in document tooling for PDF, DOCX, and PPTX workflows
+
+## Why not wire the SDK yourself?
+
+| Capability | Sandstorm | Raw SDK + E2B | DIY runner |
+|------------|-----------|---------------|------------|
 | Fresh sandbox per request | Built in | Manual wiring | Manual wiring |
-| SSE API endpoint | Built in | Manual wiring | Manual wiring |
-| File uploads | Built in | Manual wiring | Manual wiring |
+| Streaming API endpoint | Built in | Manual wiring | Custom work |
+| File uploads | Built in | Manual wiring | Custom work |
 | `sandstorm.json` config layer | Built in | No | Custom work |
 | Slack bot integration | Built in | No | Custom work |
-| Structured output + whitelists | Built in | Manual wiring | Custom work |
+| Starter scaffolding with `ds init` | Built in | No | Custom work |
 
-### Why Sandstorm?
+## Docs
 
-Sandstorm packages the [Claude Agent SDK](https://platform.claude.com/docs/en/agent-sdk/overview)
-into isolated [E2B](https://e2b.dev) sandboxes so you can run production-style agents without
-building the runner, transport, and config layer yourself. It is not limited to coding agents:
-the same runtime works for research, content generation, document workflows, issue triage,
-competitive analysis, automation, and software tasks. It is the open-source version of the
-agent runtime we use at [duvo.ai](https://duvo.ai).
+- [Getting started](docs/getting-started.md)
+- [Configuration](docs/configuration.md)
+- [API reference](docs/api.md)
+- [Slack bot](docs/slack.md)
+- [Deployment](docs/deployment.md)
+- [OpenRouter](docs/openrouter.md)
+- [Advanced examples](examples/README.md)
 
-- **Any model via OpenRouter** -- swap in DeepSeek R1, Qwen 3, Kimi K2, or any of 300+ models through [OpenRouter](https://openrouter.ai)
-- **Full agent power** -- Bash, Read, Write, Edit, Glob, Grep, WebSearch, WebFetch -- all enabled by default
-- **Document skills built-in** -- PDF, DOCX, and PPTX processing pre-installed in every sandbox
-- **Safe by design** -- every request gets a fresh VM that's destroyed after, with zero state leakage
-- **Real-time streaming** -- watch the agent work step-by-step via SSE, not just the final answer
-- **Configure once, query forever** -- drop a `sandstorm.json` for structured output, subagents, MCP servers, and system prompts
-- **File uploads** -- send code, data, documents, transcripts, or configs for the agent to work with
-- **Slack bot** -- [@mention in channels](docs/slack.md), DM threads, file uploads, streaming responses, multi-turn conversations with sandbox reuse
+## Community
 
-### Get Started
+If Sandstorm saves you runner plumbing, please [star the repo](https://github.com/tomascupr/sandstorm).
 
-```bash
-pip install duvo-sandstorm
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
-ds "Summarize the top product announcements in AI infrastructure this week"
-```
-
-If Sandstorm is useful, consider giving it a [star](https://github.com/tomascupr/sandstorm) — it helps others find it.
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
-
-## Quickstart
-
-### Prerequisites
-
-- Python 3.11+
-- [E2B](https://e2b.dev) API key
-- [Anthropic](https://console.anthropic.com) API key or [OpenRouter](https://openrouter.ai) API key
-- [uv](https://docs.astral.sh/uv/) (only for source installs)
-
-### Install
-
-```bash
-# From PyPI
-pip install duvo-sandstorm
-
-# Or from source
-git clone https://github.com/tomascupr/sandstorm.git
-cd sandstorm
-uv sync
-```
-
-### E2B Sandbox Template
-
-Sandstorm ships with a public pre-built template (`work-43ca/sandstorm`) that's used automatically — no build step needed. The template includes Node.js 24, `@anthropic-ai/claude-agent-sdk`, Python 3, git, ripgrep, curl, and document processing skills (pdf, docx, pptx).
-
-To customize the template (e.g. add system packages or pre-install other dependencies), edit `build_template.py` and rebuild:
-
-```bash
-uv run python build_template.py
-```
-
-## CLI
-
-After installing, the `duvo-sandstorm` (or `ds`) command is available:
-
-### Run an agent
-
-The `query` command is the default — just pass a prompt directly:
-
-```bash
-ds "Compare Vercel, Netlify, and Cloudflare Pages for a startup team"
-ds "Create a content brief for a landing page about AI support agents" --model opus
-ds "Build a chart from the uploaded CSV" --max-turns 30 --timeout 600
-ds "Summarize the attached transcript and extract action items" --json-output | jq '.type'
-```
-
-The explicit `query` subcommand also works: `ds query "Summarize this PDF and list the key risks"`.
-
-### Upload files
-
-Use `-f` / `--file` to send local files into the sandbox (repeatable):
-
-```bash
-ds "Analyze this data and find outliers" -f data.csv
-ds "Compare these configs" -f prod.json -f staging.json
-ds "Summarize this board deck" -f board-update.md
-```
-
-Files are uploaded to `/home/user/{filename}` before the agent starts. Only text files are supported; binary files must be sent via the [API](#file-uploads) instead.
-
-### Start the server
-
-```bash
-ds serve                    # default: 0.0.0.0:8000
-ds serve --port 3000        # custom port
-ds serve --reload           # auto-reload for development
-```
-
-### API keys
-
-Keys are resolved in order: CLI flags > environment variables > `.env` file in current directory.
-
-```bash
-# Environment variables (most common)
-export ANTHROPIC_API_KEY=sk-ant-...
-export E2B_API_KEY=e2b_...
-
-# Or CLI flags
-ds "hello" --anthropic-api-key sk-ant-... --e2b-api-key e2b_...
-```
-
-## How It Works
-
-```mermaid
-sequenceDiagram
-    participant Client
-    participant FastAPI as Sandstorm (FastAPI)
-    participant E2B as E2B Sandbox
-    participant SDK as Claude Agent SDK
-
-    Client->>FastAPI: POST /query {prompt, files}
-    FastAPI->>E2B: Create sandbox
-    E2B-->>FastAPI: Sandbox ready
-    FastAPI->>E2B: Upload runner + config + files
-    FastAPI->>E2B: node runner.mjs
-    E2B->>SDK: query(prompt, tools, config)
-
-    loop Agent execution
-        SDK->>E2B: Tool calls (Bash, Read, Write, WebSearch...)
-        E2B-->>SDK: Tool results
-        E2B-->>FastAPI: stdout (JSON lines)
-        FastAPI-->>Client: SSE events
-    end
-
-    SDK-->>E2B: Final result
-    E2B-->>FastAPI: Result + cost
-    FastAPI-->>Client: SSE result event
-    FastAPI->>E2B: Kill sandbox
-```
-
-1. Your app sends a prompt to `POST /query`
-2. Sandstorm creates a fresh E2B sandbox with the Claude Agent SDK pre-installed
-3. The agent runs your prompt with full tool access inside the sandbox
-4. Every agent message (thoughts, tool calls, results) streams back as SSE events
-5. The sandbox is destroyed when done -- nothing persists
-
-## Features
-
-### Structured Output
-
-Configure in `sandstorm.json` to get validated JSON instead of free-form text:
-
-```json
-{
-  "output_format": {
-    "type": "json_schema",
-    "schema": {
-      "type": "object",
-      "properties": {
-        "summary": { "type": "string" },
-        "items": { "type": "array", "items": { "type": "object" } }
-      },
-      "required": ["summary", "items"]
-    }
-  }
-}
-```
-
-The agent works normally (scrapes data, installs packages, writes files), then returns validated JSON in `result.structured_output`.
-
-### Subagents
-
-Define specialized agents in `sandstorm.json` that the main agent can delegate to:
-
-```json
-{
-  "agents": {
-    "scraper": {
-      "description": "Crawls websites and saves structured data to disk.",
-      "prompt": "Scrape the target, extract data, and save as JSON to /home/user/output/.",
-      "tools": ["Bash", "WebFetch", "Write", "Read"],
-      "model": "sonnet"
-    },
-    "report-writer": {
-      "description": "Reads collected data and produces formatted reports.",
-      "prompt": "Read all data files, synthesize findings, and generate a PDF report with charts.",
-      "tools": ["Bash", "Read", "Write", "Glob"]
-    }
-  }
-}
-```
-
-The main agent spawns subagents via the `Task` tool when it decides they're needed.
-
-### File Uploads
-
-Send files in the request for the agent to work with:
-
-```bash
-curl -N -X POST https://your-sandstorm-host/query \
-  -d '{
-    "prompt": "Parse these server logs, find error spikes, and write an incident report",
-    "files": {
-      "logs/app.log": "2024-01-15T10:23:01Z ERROR [auth] connection pool exhausted\n...",
-      "logs/deploys.json": "[{\"sha\": \"a1b2c3\", \"ts\": \"2024-01-15T10:20:00Z\"}]"
-    }
-  }'
-```
-
-Files are written to `/home/user/{path}` in the sandbox before the agent starts. From the CLI, use `-f` / `--file` instead (see [Upload files](#upload-files)).
-
-### Skills
-
-Skills give the agent reusable domain knowledge via [Claude Code Skills](https://docs.anthropic.com/en/docs/claude-code/skills). Each skill is a folder with a `SKILL.md` file (plus optional scripts and references) — Sandstorm uploads them into the sandbox before the agent starts, where they become available as `/slash-commands`.
-
-**Built-in skills:** The default sandbox template comes with three document processing skills pre-installed — **pdf**, **docx**, and **pptx**. The agent can create, edit, merge, split, and analyze documents out of the box. No configuration needed.
-
-To add your own skills, create a skills directory with one subfolder per skill, each containing a `SKILL.md`:
-
-```
-.claude/skills/
-  code-review/
-    SKILL.md
-  data-analyst/
-    SKILL.md
-```
-
-Then point `skills_dir` in `sandstorm.json` to it:
-
-```json
-{
-  "skills_dir": ".claude/skills"
-}
-```
-
-Each skill becomes a slash command the agent can use — a folder named `data-analyst` registers as `/data-analyst`. Names must contain only letters, numbers, hyphens, and underscores.
-
-### MCP Servers
-
-Attach external tools via [MCP](https://modelcontextprotocol.io) in `sandstorm.json`:
-
-```json
-{
-  "mcp_servers": {
-    "sqlite": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sqlite", "/home/user/data.db"]
-    },
-    "remote-api": {
-      "type": "sse",
-      "url": "https://api.example.com/mcp/sse",
-      "headers": { "Authorization": "Bearer your-token" }
-    }
-  }
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `type` | `string` | `"stdio"`, `"http"`, or `"sse"` |
-| `command` | `string` | Command for stdio servers |
-| `args` | `string[]` | Command arguments |
-| `url` | `string` | URL for HTTP/SSE servers |
-| `headers` | `object` | Auth headers for remote servers |
-| `env` | `object` | Environment variables |
-
-### Webhooks
-
-Track sandbox lifecycle events (created, updated, killed) via E2B webhooks. Add `webhook_url` to `sandstorm.json` for zero-config setup — the server auto-registers on startup and deregisters on shutdown:
-
-```json
-{
-  "webhook_url": "https://your-server.com"
-}
-```
-
-Or manage manually via CLI:
-
-```bash
-ds webhook register https://your-server.com   # auto-appends /webhooks/e2b, saves secret to .env
-ds webhook test https://your-server.com/webhooks/e2b  # verify endpoint
-ds webhook list                                # list registered webhooks
-ds webhook delete <id>                         # remove a webhook
-```
-
-Set `SANDSTORM_WEBHOOK_SECRET` to enable HMAC-SHA256 signature verification. The `register` command auto-generates and saves the secret to `.env` if not already set.
-
-## Examples
-
-Ready-to-use configs for common use cases — `cd` into any example and run:
-
-| Example | What it does | Key features |
-|---------|-------------|--------------|
-| [Competitive Analysis](examples/competitive-analysis/) | Research and compare competitors | `output_format`, WebFetch, WebSearch |
-| [Content Brief](examples/content-brief/) | Generate content briefs with SEO research | `output_format`, WebSearch |
-| [Issue Triage](examples/issue-triage/) | Classify, prioritize, and deduplicate incoming reports or issues | `output_format`, `allowed_tools`, file uploads |
-| [Code Reviewer](examples/code-reviewer/) | Structured code review with severity ratings | `output_format`, `allowed_tools` |
-| [Repo Migration](examples/repo-migration/) | Plan a staged migration from one stack or architecture to another | `output_format`, `allowed_tools`, file uploads |
-| [Docs to OpenAPI](examples/docs-to-openapi/) | Crawl docs and extract a draft API spec plus endpoint summary | `output_format`, WebFetch, Write |
-| [Security Auditor](examples/security-auditor/) | Multi-agent security audit with OWASP skill | `agents`, `skills_dir`, `output_format` |
-
-See [examples/](examples/) for the full feature matrix and usage guide.
-
-## OpenRouter
-
-Use any of 300+ models (GPT-4o, Qwen, DeepSeek, Gemini, Llama) via [OpenRouter](https://openrouter.ai). Three env vars to set up:
-
-```bash
-ANTHROPIC_BASE_URL=https://openrouter.ai/api
-OPENROUTER_API_KEY=sk-or-...
-ANTHROPIC_DEFAULT_SONNET_MODEL=anthropic/claude-sonnet-4  # or any model ID
-```
-
-For model remapping, per-request keys, and compatibility details, see the [full OpenRouter guide](docs/openrouter.md).
-
-## Authentication
-
-Sandstorm supports optional Bearer token authentication on the `/query` endpoint. When `SANDSTORM_API_KEY` is set, all requests to `/query` must include a valid `Authorization: Bearer <token>` header. When not set, the endpoint is open (suitable for local development).
-
-```bash
-# Enable authentication
-export SANDSTORM_API_KEY="your-secret-token-at-least-32-characters-long"
-
-# Requests must include the token
-curl -N -X POST https://your-sandstorm-host/query \
-  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"prompt": "Hello world"}'
-```
-
-**Key rotation** is supported via `SANDSTORM_API_KEY_PREVIOUS` -- both the current and previous keys are accepted during the transition period:
-
-```bash
-export SANDSTORM_API_KEY="new-key-at-least-32-characters-long"
-export SANDSTORM_API_KEY_PREVIOUS="old-key-at-least-32-characters-long"
-```
-
-Notes:
-- Keys must be at least 32 characters long (server refuses to start otherwise)
-- The `/health` endpoint is always accessible without authentication
-- Token comparison uses `secrets.compare_digest` (timing-safe)
-- Failed attempts log the client IP and a token prefix (first 8 chars) for diagnostics
-
-## Configuration
-
-Sandstorm uses a two-layer config system:
-
-| Layer | What it controls | How to set |
-|-------|-----------------|------------|
-| **`sandstorm.json`** | Agent behavior -- system prompt, structured output, subagents, MCP servers, skills | Config file in project root |
-| **API request** | Per-call -- prompt, model, files, timeout, output format, tool/agent/skill whitelisting | JSON body on `POST /query` |
-
-### `sandstorm.json`
-
-Drop a `sandstorm.json` in your project root. See [Structured Output](#structured-output), [Subagents](#subagents), and [MCP Servers](#mcp-servers) for feature-specific examples.
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `system_prompt` | `string` | Custom instructions for the agent |
-| `model` | `string` | Default model (`"sonnet"`, `"opus"`, `"haiku"`, or full ID) |
-| `max_turns` | `integer` | Maximum conversation turns |
-| `output_format` | `object` | JSON schema for [structured output](#structured-output) |
-| `agents` | `object` | [Subagent](#subagents) definitions |
-| `mcp_servers` | `object` | [MCP server](#mcp-servers) configurations |
-| `skills_dir` | `string` | Path to directory containing [skills](#skills) subdirectories |
-| `allowed_tools` | `list` | Restrict agent to specific tools (e.g. `["Bash", "Read"]`). `"Skill"` is auto-added when skills are present |
-| `template_skills` | `boolean` | Set `true` when skills are baked into the E2B template (skips runtime upload) |
-| `webhook_url` | `string` | Public URL for E2B lifecycle webhooks. Server auto-registers on startup, deregisters on shutdown |
-
-### API Keys
-
-Keys can live in `.env` (set once) or be passed per-request (multi-tenant). Request body overrides `.env`.
-
-```bash
-# .env -- set once, forget about it
-ANTHROPIC_API_KEY=sk-ant-...
-E2B_API_KEY=e2b_...
-
-# Then just send prompts (add -H "Authorization: Bearer ..." if SANDSTORM_API_KEY is set):
-curl -N -X POST https://your-sandstorm-host/query \
-  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
-  -d '{"prompt": "Crawl docs.stripe.com/api and generate an OpenAPI spec as YAML"}'
-
-# Or override per-request:
-curl -N -X POST https://your-sandstorm-host/query \
-  -H "Authorization: Bearer $SANDSTORM_API_KEY" \
-  -d '{"prompt": "...", "anthropic_api_key": "sk-ant-other", "e2b_api_key": "e2b_other"}'
-```
-
-### Providers
-
-Sandstorm supports Anthropic (default), Google Vertex AI, Amazon Bedrock, Microsoft Azure, [OpenRouter](#openrouter), and custom API proxies. Add the env vars to `.env` and restart -- the SDK detects them automatically.
-
-| Provider | Key env vars |
-|----------|-------------|
-| **Anthropic** (default) | `ANTHROPIC_API_KEY` |
-| **[OpenRouter](#openrouter)** | `ANTHROPIC_BASE_URL`, `OPENROUTER_API_KEY` (see [OpenRouter](#openrouter)) |
-| **Vertex AI** | `CLAUDE_CODE_USE_VERTEX=1`, `CLOUD_ML_REGION`, `ANTHROPIC_VERTEX_PROJECT_ID` |
-| **Bedrock** | `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` |
-| **Azure** | `CLAUDE_CODE_USE_FOUNDRY=1`, `AZURE_FOUNDRY_RESOURCE`, `AZURE_API_KEY` |
-| **Custom proxy** | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` (optional) |
-
-## Dashboard
-
-Start the server and open `http://localhost:8000/` to see a live dashboard of recent agent runs handled by that server process:
-
-```bash
-ds serve
-open http://localhost:8000
-```
-
-The dashboard auto-refreshes every 3 seconds, showing status, model, cost, turns, and duration for each run. Run history is persisted to `.sandstorm/runs.jsonl` and survives server restarts.
-
-The `GET /runs` endpoint returns the same data as JSON for programmatic access.
-
-> **Note:** Dashboard history is process-local today. In multi-worker or multi-instance deployments, each process shows only the runs it handled. On Vercel, history is also limited to the current function invocation because the filesystem is ephemeral.
-
-## Slack Bot
-
-Run Sandstorm agents directly in Slack — @mention in channels for quick tasks, or DM for 1:1 conversations. Responses stream in real-time, files uploaded in threads are available to the agent, and follow-up messages reuse the same sandbox.
-
-```bash
-pip install "duvo-sandstorm[slack]"
-ds slack setup    # interactive wizard — creates app, saves tokens to .env
-ds slack start    # Socket Mode (dev, no public URL needed)
-```
-
-Then `@Sandstorm <task>` in any channel. For the full guide (HTTP mode, configuration, features), see [docs/slack.md](docs/slack.md).
-
-> **Deployment note:** Slack thread sandbox reuse is currently process-local. If you run multiple workers or instances, a follow-up thread reply may land on a different process and start a fresh sandbox unless you add sticky routing or a shared session backend.
-
-## API Reference
-
-### `GET /runs`
-
-Returns recent agent runs as a JSON array, newest first.
-
-```json
-[
-  {
-    "id": "a1b2c3d4",
-    "prompt": "Create hello.py and run it",
-    "model": "claude-sonnet-4-5-20250929",
-    "status": "completed",
-    "cost_usd": 0.069,
-    "num_turns": 6,
-    "duration_secs": 28.5,
-    "started_at": "2025-02-18T22:10:30Z",
-    "error": null,
-    "files_count": 0
-  }
-]
-```
-
-### `POST /query`
-
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `prompt` | `string` | Yes | -- | The task for the agent (min 1 char) |
-| `anthropic_api_key` | `string` | No | `$ANTHROPIC_API_KEY` | Anthropic key (falls back to env) |
-| `openrouter_api_key` | `string` | No | `$OPENROUTER_API_KEY` | OpenRouter key (falls back to env) |
-| `e2b_api_key` | `string` | No | `$E2B_API_KEY` | E2B key (falls back to env) |
-| `model` | `string` | No | from config | Overrides `sandstorm.json` model |
-| `max_turns` | `integer` | No | from config | Overrides `sandstorm.json` max_turns |
-| `timeout` | `integer` | No | `300` | Sandbox lifetime in seconds |
-| `files` | `object` | No | `null` | Files to upload (`{path: content}`) |
-| `output_format` | `object` | No | from config | Overrides `sandstorm.json` output_format |
-| `allowed_mcp_servers` | `string[]` | No | `null` (all) | Whitelist MCP servers by name from config |
-| `allowed_skills` | `string[]` | No | `null` (all) | Whitelist skills by name. Template skills are always available |
-| `allowed_tools` | `string[]` | No | from config | Override allowed tools from `sandstorm.json` |
-| `allowed_agents` | `string[]` | No | `null` (all) | Whitelist agents by name from config |
-| `extra_agents` | `object` | No | `null` | Inline agent definitions merged with config (`{name: config}`) |
-| `extra_skills` | `object` | No | `null` | Inline skill definitions merged with disk skills (`{name: markdown}`) |
-
-**Response:** `text/event-stream`
-
-### `POST /webhooks/e2b`
-
-Receives E2B sandbox lifecycle events (created, updated, killed). Verifies HMAC-SHA256 signature when `SANDSTORM_WEBHOOK_SECRET` is set. Used automatically when `webhook_url` is configured in `sandstorm.json`.
-
-### `GET /health`
-
-Returns `{"status": "ok", "version": "..."}`. Add `?deep=true` to check E2B API reachability and configured API keys:
-
-```json
-{
-  "status": "ok",
-  "version": "0.7.1",
-  "checks": {
-    "anthropic_api_key": true,
-    "e2b_api_key": true,
-    "e2b_api": true
-  }
-}
-```
-
-### SSE Event Types
-
-| Type | Description |
-|------|-------------|
-| `system` | Session init -- tools, model, session ID |
-| `assistant` | Agent text + tool calls |
-| `user` | Tool execution results |
-| `result` | Final result with `total_cost_usd`, `num_turns`, and optional `structured_output` |
-| `error` | Error details (only on failure) |
-
-## Client Examples
-
-### Python
-
-```bash
-pip install "duvo-sandstorm[client]"
-```
-
-```python
-import asyncio
-from sandstorm import SandstormClient
-
-async def main():
-    async with SandstormClient("https://your-sandstorm-host") as client:
-        async for event in client.query("Scrape the top 50 HN stories, cluster by topic"):
-            if event.text:
-                print(event.text, end="")
-
-asyncio.run(main())
-```
-
-### TypeScript
-
-```typescript
-const res = await fetch("https://your-sandstorm-host/query", {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    prompt: "Fetch recent arxiv papers on LLM agents, extract findings, write a lit review",
-  }),
-});
-
-const reader = res.body!.getReader();
-const decoder = new TextDecoder();
-while (true) {
-  const { done, value } = await reader.read();
-  if (done) break;
-  console.log(decoder.decode(value));
-}
-```
-
-## Roadmap
-
-Near-term work is focused on making Sandstorm easier to adopt and safer to run:
-
-- More opinionated starter templates for research, content, ops, support, and software tasks
-- Better cluster-safe state handling for dashboard history and Slack sandbox reuse
-- Richer client examples and docs for Python and TypeScript
-- More example outputs, screenshots, and launch-ready demo assets
-
-If you want to shape that roadmap, open an issue or join the repo discussions.
-
-## Deployment
-
-Core query execution is stateless -- each request creates an independent sandbox and tears it
-down when done. Dashboard history and Slack sandbox reuse are still process-local today. For
-production deployment with Gunicorn, concurrent agent execution, and scaling guidance, see the
-[deployment guide](docs/deployment.md).
-
-### Docker
-
-The repo includes a `Dockerfile` and `docker-compose.yml` with health checks pre-configured:
-
-```bash
-# Using Docker Compose (recommended)
-docker compose up
-
-# Or build and run manually
-docker build -t sandstorm .
-docker run -p 8000:8000 --env-file .env sandstorm
-```
-
-Deploy this container to any platform -- Railway, Fly.io, Cloud Run, ECS, Kubernetes. Since there's no state to persist, scaling up or down is just changing the replica count.
-
-### Vercel
-
-One-click deploy:
-
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Ftomascupr%2Fsandstorm&env=ANTHROPIC_API_KEY,E2B_API_KEY)
-
-The repo includes `vercel.json` and `api/index.py` pre-configured. Set `ANTHROPIC_API_KEY` and `E2B_API_KEY` as environment variables in your Vercel project settings.
-
-> **Note:** Vercel serverless functions have a maximum duration of 300s on Pro plans (10s on Hobby). For long-running agent tasks, use the Docker deployment or a dedicated server instead.
-
-## Security
-
-- **API token authentication** -- optional Bearer token auth on `/query` with timing-safe comparison, key rotation, and failed-attempt logging
-- **Isolated execution** -- every request gets a fresh VM sandbox, destroyed after
-- **No server secrets** -- keys via `.env` or per-request, never stored server-side
-- **No shell injection** -- prompts and config written as files, never interpolated into commands
-- **Path traversal prevention** -- file upload paths are normalized and validated
-- **Structured errors** -- failures stream as SSE error events, not silent drops
-- **No persistence** -- nothing survives between requests
-
-> **Note:** The Anthropic API key is passed into the sandbox as an environment variable (the SDK requires it). The agent runs with `bypassPermissions` mode, so it has full access to the sandbox environment. Use per-request keys with spending limits for untrusted callers.
-
-For reporting vulnerabilities, see [SECURITY.md](SECURITY.md).
-
-## License
-
-[MIT](LICENSE)
+If you want a new starter, a provider integration, or a sharper deploy story, open an issue or
+start a discussion.
