@@ -35,6 +35,8 @@ _PROVIDER_ENV_KEYS = [
     # Custom base URL (proxy, self-hosted, OpenRouter)
     "ANTHROPIC_BASE_URL",
     "ANTHROPIC_AUTH_TOKEN",
+    # MCP providers that rely on inherited sandbox env vars
+    "LINEAR_API_KEY",
     # Model name overrides (remap SDK aliases to provider model IDs)
     "ANTHROPIC_DEFAULT_SONNET_MODEL",
     "ANTHROPIC_DEFAULT_OPUS_MODEL",

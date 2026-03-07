@@ -435,7 +435,7 @@ class TestCli:
             "args": ["-y", "@modelcontextprotocol/server-linear"],
             "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
         }
-        assert config["allowed_tools"] == ["Read", "mcp__linear"]
+        assert config["allowed_tools"] == ["Read", "mcp__linear__*"]
         assert env_lines == ["LINEAR_API_KEY='lin-api-key'"]
         assert env_example_lines == ["LINEAR_API_KEY="]
         assert (tmp_path / ".env").stat().st_mode & 0o777 == 0o600
@@ -475,7 +475,7 @@ class TestCli:
                             "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
                         }
                     },
-                    "allowed_tools": ["Read", "mcp__linear"],
+                    "allowed_tools": ["Read", "mcp__linear__*"],
                 }
             ),
             encoding="utf-8",

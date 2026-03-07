@@ -29,7 +29,7 @@ TOOLPACKS: tuple[ToolpackDefinition, ...] = (
             "args": ["-y", "@modelcontextprotocol/server-linear"],
             "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
         },
-        allowed_tools=("mcp__linear",),
+        allowed_tools=("mcp__linear__*",),
     ),
 )
 

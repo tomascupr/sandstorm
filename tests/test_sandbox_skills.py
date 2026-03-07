@@ -8,7 +8,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import sandstorm.config as config_mod
-from sandstorm.config import _build_agent_config, _validate_sandstorm_config, load_sandstorm_config
+from sandstorm.config import (
+    _PROVIDER_ENV_KEYS,
+    _build_agent_config,
+    _validate_sandstorm_config,
+    load_sandstorm_config,
+)
 from sandstorm.files import (
     _MAX_EXTRACT_FILE_SIZE,
     _MAX_EXTRACT_FILES,
@@ -20,6 +25,9 @@ from sandstorm.models import QueryRequest
 
 
 class TestValidateSandstormConfigSkills:
+    def test_provider_env_keys_keep_linear_api_key(self):
+        assert "LINEAR_API_KEY" in _PROVIDER_ENV_KEYS
+
     def test_allowed_tools_valid(self):
         config = _validate_sandstorm_config({"allowed_tools": ["Skill", "Read", "Bash"]})
         assert config["allowed_tools"] == ["Skill", "Read", "Bash"]
