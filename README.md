@@ -11,8 +11,6 @@ Built on the Claude Agent SDK and E2B.
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-![Sandstorm live run and dashboard](docs/assets/sandstorm-demo.svg)
-
 Sandstorm is for people who want real agent work, not a chat wrapper:
 
 - Research Acme's competitors, crawl their sites and recent news, and write a one-page branded briefing PDF with sources
