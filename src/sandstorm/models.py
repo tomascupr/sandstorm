@@ -143,6 +143,9 @@ class QueryRequest(BaseModel):
             raise ValueError(f"Total file size {total_size:,} bytes exceeds 10MB limit")
         safe = {}
         for path, content in v.items():
+            if path.startswith("/"):
+                raise ValueError(f"Absolute paths are not allowed: {path}")
+
             normalized = normpath(path).lstrip("/")
             if not normalized or normalized.startswith("..") or normalized == ".":
                 raise ValueError(f"Path traversal not allowed: {path}")
