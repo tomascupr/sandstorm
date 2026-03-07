@@ -73,13 +73,6 @@ def _read_project_dotenv() -> dict[str, str]:
     return {key: value for key, value in dotenv_values(env_path).items() if value is not None}
 
 
-def _snapshot_project_dotenv() -> dict[str, str]:
-    """Return project .env entries that currently match the process environment."""
-    return {
-        key: value for key, value in _read_project_dotenv().items() if os.environ.get(key) == value
-    }
-
-
 def load_project_dotenv(*args: Any, **kwargs: Any) -> bool:
     """Load dotenv values and track which project-local keys came from .env."""
     global _LOADED_DOTENV_VALUES
@@ -87,8 +80,21 @@ def load_project_dotenv(*args: Any, **kwargs: Any) -> bool:
     if not args and "dotenv_path" not in kwargs and "stream" not in kwargs:
         kwargs = {**kwargs, "dotenv_path": _get_env_path()}
 
+    current = _read_project_dotenv()
+    previous_env = {key: os.environ.get(key) for key in current}
+    override = bool(kwargs.get("override", False))
+
     loaded = _load_dotenv(*args, **kwargs)
-    _LOADED_DOTENV_VALUES = _snapshot_project_dotenv()
+    _LOADED_DOTENV_VALUES = {
+        key: value
+        for key, value in _read_project_dotenv().items()
+        if os.environ.get(key) == value
+        and (
+            key in _LOADED_DOTENV_VALUES
+            or previous_env.get(key) is None
+            or (override and previous_env.get(key) != value)
+        )
+    }
     return loaded
 
 
@@ -98,19 +104,23 @@ def _refresh_project_dotenv() -> None:
 
     current = _read_project_dotenv()
 
-    for key, previous in _LOADED_DOTENV_VALUES.items():
+    previous_loaded = _LOADED_DOTENV_VALUES
+
+    for key, previous in previous_loaded.items():
         if key not in current and os.environ.get(key) == previous:
             os.environ.pop(key, None)
 
+    loaded_values: dict[str, str] = {}
     for key, value in current.items():
-        if key in os.environ and key not in _LOADED_DOTENV_VALUES:
+        if key in os.environ and key not in previous_loaded:
             continue  # Explicitly set outside .env — don't overwrite
         current_value = os.environ.get(key)
-        previous_value = _LOADED_DOTENV_VALUES.get(key)
+        previous_value = previous_loaded.get(key)
         if current_value is None or current_value == previous_value:
             os.environ[key] = value
+            loaded_values[key] = value
 
-    _LOADED_DOTENV_VALUES = current
+    _LOADED_DOTENV_VALUES = loaded_values
 
 
 def _validate_sandstorm_config(raw: dict) -> dict:

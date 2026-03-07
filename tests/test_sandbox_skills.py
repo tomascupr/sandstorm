@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -481,6 +482,23 @@ class TestBuildAgentConfigMcpWhitelist:
         config, _ = _build_agent_config(_req(), cfg, {})
 
         assert config["mcp_servers"] == {"linear": {"env": {"LINEAR_API_KEY": "shell-key"}}}
+
+    def test_preserves_matching_shell_env_when_key_is_removed_from_dotenv(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LINEAR_API_KEY", "shared-key")
+        env_path = tmp_path / ".env"
+
+        env_path.write_text("LINEAR_API_KEY=shared-key\n", encoding="utf-8")
+        config_mod.load_project_dotenv()
+        assert config_mod._LOADED_DOTENV_VALUES == {}
+
+        env_path.unlink()
+        config_mod._refresh_project_dotenv()
+
+        assert config_mod._LOADED_DOTENV_VALUES == {}
+        assert os.environ["LINEAR_API_KEY"] == "shared-key"
 
     def test_missing_required_placeholder_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

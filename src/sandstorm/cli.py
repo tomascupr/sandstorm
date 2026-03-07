@@ -273,15 +273,19 @@ def _get_env_value(name: str) -> str:
     return os.environ.get(name, "").strip()
 
 
-def _read_project_env_values() -> dict[str, str]:
-    """Read the current project's .env file for project-local secrets."""
-    env_path = Path.cwd() / ".env"
-    if not env_path.is_file():
+def _read_env_values(path: Path) -> dict[str, str]:
+    """Read a dotenv file into trimmed string values."""
+    if not path.is_file():
         return {}
     return {
         key: value.strip() if isinstance(value, str) else ""
-        for key, value in dotenv_values(env_path).items()
+        for key, value in dotenv_values(path).items()
     }
+
+
+def _read_project_env_values() -> dict[str, str]:
+    """Read the current project's .env file for project-local secrets."""
+    return _read_env_values(Path.cwd() / ".env")
 
 
 def _copy_env_values(values: dict[str, str], *names: str) -> None:
@@ -389,13 +393,19 @@ def _upsert_env_file(
     *,
     quote_mode: str,
     chmod_private_on_create: bool = False,
-) -> None:
+) -> bool:
     """Upsert a key in a dotenv-style file."""
+    sanitized = _sanitize_env_value(value)
+    current_values = _read_env_values(path) if path.exists() else {}
+    if name in current_values and current_values[name] == sanitized:
+        return False
+
     created = not path.exists()
     path.parent.mkdir(parents=True, exist_ok=True)
-    set_key(str(path), name, _sanitize_env_value(value), quote_mode=quote_mode)
+    set_key(str(path), name, sanitized, quote_mode=quote_mode)
     if chmod_private_on_create and created:
         path.chmod(0o600)
+    return True
 
 
 def _resolve_toolpack_env_vars(toolpack: ToolpackDefinition) -> dict[str, str]:
@@ -498,15 +508,15 @@ def _maybe_prompt_for_env_file(destination: Path) -> tuple[bool, list[str]]:
         )
         return False, remaining_missing
 
-    env_lines = [
-        f"{name}={_sanitize_env_value(value)}"
+    env_values = {
+        name: _sanitize_env_value(value)
         for name, value in env_values.items()
         if _sanitize_env_value(value)
-    ]
-    if not env_lines:
+    }
+    if not env_values:
         return False, missing
-    env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
-    env_path.chmod(0o600)
+    for name, value in env_values.items():
+        _upsert_env_file(env_path, name, value, quote_mode="always", chmod_private_on_create=True)
     return True, []
 
 
@@ -637,6 +647,7 @@ def add(toolpack_name: str | None, show_list: bool, force: bool) -> None:
         raise click.BadParameter(str(exc), param_hint="toolpack") from exc
 
     config_path, config = _load_project_config_for_editing()
+    has_allowed_tools = "allowed_tools" in config
     config_changed = _install_toolpack_config(config, toolpack, force=force)
     env_values = _resolve_toolpack_env_vars(toolpack)
     if config_changed:
@@ -644,15 +655,30 @@ def add(toolpack_name: str | None, show_list: bool, force: bool) -> None:
 
     env_path = Path.cwd() / ".env"
     example_path = Path.cwd() / ".env.example"
+    env_files_changed = False
     for name, value in env_values.items():
-        _upsert_env_file(env_path, name, value, quote_mode="always", chmod_private_on_create=True)
-        _upsert_env_file(example_path, name, "", quote_mode="never")
+        env_files_changed |= _upsert_env_file(
+            env_path,
+            name,
+            value,
+            quote_mode="always",
+            chmod_private_on_create=True,
+        )
+        env_files_changed |= _upsert_env_file(example_path, name, "", quote_mode="never")
 
     if config_changed:
         click.echo(f"Installed {toolpack.slug} in {config_path.name}.")
     else:
         click.echo(f"{toolpack.slug} is already installed.")
-    click.echo("Updated .env and .env.example.")
+    if toolpack.allowed_tools and not has_allowed_tools:
+        click.echo(
+            "Note: sandstorm.json has no allowed_tools list, so no MCP tool patterns were "
+            "added. All tools remain allowed until you define allowed_tools explicitly."
+        )
+    if env_files_changed:
+        click.echo("Updated .env and .env.example.")
+    else:
+        click.echo(".env and .env.example already match.")
 
 
 @cli.command()
