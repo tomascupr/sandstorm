@@ -990,8 +990,6 @@ def slack_setup() -> None:
         click.echo(f"\n  Warning: Could not verify token: {exc}", err=True)
 
     # Step 4: Save to .env
-    from dotenv import set_key
-
     env_path = str(Path.cwd() / ".env")
     set_key(env_path, "SLACK_BOT_TOKEN", bot_token)
     set_key(env_path, "SLACK_APP_TOKEN", app_token)
