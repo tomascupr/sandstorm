@@ -49,6 +49,7 @@ All checks must pass before a PR can be merged:
 ```bash
 ruff check src/ tests/              # Lint
 ruff format --check src/ tests/     # Format check
+uv build                            # Wheel + sdist build
 uv run pyright src/sandstorm/       # Type check
 uv run pytest tests/                # Tests
 ```
@@ -83,7 +84,7 @@ docs: update OpenRouter configuration guide
 
 1. Fork the repo and create a branch from `main`
 2. Make your changes — keep PRs focused on a single concern
-3. Ensure all checks pass (`ruff check`, `ruff format --check`, `uv run pyright`, `pytest`)
+3. Ensure all checks pass (`ruff check`, `ruff format --check`, `uv build`, `uv run pyright`, `pytest`)
 4. Write a clear PR description explaining _what_ and _why_
 5. Link related issues with `Fixes #123` or `Closes #123`
 

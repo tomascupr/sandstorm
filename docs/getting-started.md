@@ -11,6 +11,22 @@ cd general-assistant
 ds "Compare Notion, Coda, and Slite for async product teams"
 ```
 
+## Install extras
+
+Use the base package for the CLI and server:
+
+```bash
+pip install duvo-sandstorm
+```
+
+Add extras only for the surfaces you need:
+
+```bash
+pip install "duvo-sandstorm[client]"      # Async Python client
+pip install "duvo-sandstorm[slack]"       # Slack bot support
+pip install "duvo-sandstorm[telemetry]"   # OpenTelemetry integration
+```
+
 The guided `ds init` flow scaffolds:
 
 - `sandstorm.json`
@@ -94,6 +110,13 @@ open http://localhost:8000
 
 The dashboard shows status, model, cost, turns, and duration for runs handled by that process.
 History is stored in `.sandstorm/runs.jsonl` and survives server restarts on the same machine.
+When `SANDSTORM_API_KEY` is set, `/runs` requires a bearer token and the built-in dashboard shows
+an auth-required message instead of run data.
+
+## Python client
+
+If you want to call Sandstorm from your own application, install the `client` extra and use the
+[Python client guide](client.md).
 
 ## Source install
 

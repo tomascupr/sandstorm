@@ -100,15 +100,32 @@
   <div class="empty-state">Loading...</div>
 </div>
 <script>
+const AUTH_REQUIRED_MESSAGE =
+  'Run history is private when API auth is enabled. Use an authenticated GET /runs request instead.';
+
 async function fetchRuns() {
   try {
     const res = await fetch('/runs');
-    if (!res.ok) return;
+    if (res.status === 401) {
+      renderUnavailable(AUTH_REQUIRED_MESSAGE);
+      return;
+    }
+    if (!res.ok) {
+      renderUnavailable('Dashboard data is temporarily unavailable.');
+      return;
+    }
     const runs = await res.json();
     render(runs);
   } catch (e) {
-    // Silently retry on next interval
+    renderUnavailable('Dashboard data is temporarily unavailable.');
   }
+}
+
+function renderUnavailable(message) {
+  const content = document.getElementById('content');
+  const stats = document.getElementById('stats');
+  content.innerHTML = `<div class="empty-state">${esc(message)}</div>`;
+  stats.innerHTML = '';
 }
 
 function render(runs) {

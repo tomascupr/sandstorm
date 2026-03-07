@@ -2,7 +2,7 @@
 
 ## Authentication
 
-Sandstorm supports optional Bearer token authentication on `/query`.
+Sandstorm supports optional Bearer token authentication on `POST /query` and `GET /runs`.
 
 ```bash
 export SANDSTORM_API_KEY="your-secret-token-at-least-32-characters-long"
@@ -13,7 +13,12 @@ curl -N -X POST https://your-sandstorm-host/query \
   -d '{"prompt": "Hello world"}'
 ```
 
-Key rotation is supported through `SANDSTORM_API_KEY_PREVIOUS`. The `/health` endpoint stays public.
+Key rotation is supported through `SANDSTORM_API_KEY_PREVIOUS`. The `/health` endpoint stays
+public. The `/` dashboard stays reachable, but it shows an auth-required message when `GET /runs`
+returns `401`.
+
+If you prefer calling Sandstorm from Python instead of raw HTTP, see the
+[Python client guide](client.md).
 
 ## `POST /query`
 
@@ -65,7 +70,8 @@ curl -N -X POST https://your-sandstorm-host/query \
 
 ## `GET /runs`
 
-Returns recent agent runs as JSON, newest first.
+Returns recent agent runs as JSON, newest first. When `SANDSTORM_API_KEY` is configured, this
+endpoint requires `Authorization: Bearer ...`.
 
 ```json
 [
@@ -82,6 +88,13 @@ Returns recent agent runs as JSON, newest first.
     "files_count": 0
   }
 ]
+```
+
+Example with auth enabled:
+
+```bash
+curl https://your-sandstorm-host/runs \
+  -H "Authorization: Bearer $SANDSTORM_API_KEY"
 ```
 
 ## `GET /health`

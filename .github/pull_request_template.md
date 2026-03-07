@@ -10,6 +10,7 @@ Brief description of the changes.
 
 - [ ] `ruff check src/ tests/` passes
 - [ ] `ruff format --check src/ tests/` passes
+- [ ] `uv build` passes
 - [ ] `uv run pytest tests/` passes
 - [ ] Manual testing done (if applicable)
 

@@ -67,5 +67,5 @@ The Sandstorm server does almost no work itself -- it just proxies between your 
 
 ## Process-Local Features
 
-- **Dashboard run history** -- `GET /runs` and the `/` dashboard only show runs handled by the current process. Use a shared store if you need cluster-wide history.
+- **Dashboard run history** -- `GET /runs` and the `/` dashboard only show runs handled by the current process. When `SANDSTORM_API_KEY` is enabled, `/runs` requires bearer auth and the built-in dashboard falls back to an auth-required message. Use a shared store if you need cluster-wide history.
 - **Slack thread sandbox reuse** -- follow-up Slack messages reuse a sandbox only when they hit the same process. Add sticky routing or a shared session backend if you need durable reuse across workers or instances.

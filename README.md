@@ -2,7 +2,7 @@
 
 Open-source runtime for general-purpose AI agents in isolated sandboxes.
 
-CLI, API, and Slack with streaming, file uploads, and config-driven behavior.
+CLI, API, Python client, and Slack with streaming, file uploads, and config-driven behavior.
 
 Built on the Claude Agent SDK and E2B.
 
@@ -62,6 +62,22 @@ ds init research-brief
 ds init security-audit my-audit
 ```
 
+## Install extras
+
+Install the base package for the CLI and server:
+
+```bash
+pip install duvo-sandstorm
+```
+
+Add extras only when you need them:
+
+```bash
+pip install "duvo-sandstorm[client]"      # Async Python client
+pip install "duvo-sandstorm[slack]"       # Slack bot support
+pip install "duvo-sandstorm[telemetry]"   # OpenTelemetry integration
+```
+
 ## Pick a starter
 
 | Starter | Use it when you want to | Typical output | Aliases |
@@ -106,6 +122,7 @@ Sandstorm is opinionated about the missing middle:
 ## Docs
 
 - [Getting started](docs/getting-started.md)
+- [Python client](docs/client.md)
 - [Configuration](docs/configuration.md)
 - [API reference](docs/api.md)
 - [Slack bot](docs/slack.md)

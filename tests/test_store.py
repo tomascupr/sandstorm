@@ -229,30 +229,40 @@ class TestRunDataclass:
 
 
 class TestDashboardEndpoint:
-    def test_dashboard_returns_html(self):
+    def test_dashboard_returns_html(self, test_env_no_auth):
         from fastapi.testclient import TestClient
 
         from sandstorm.main import app
 
-        client = TestClient(app)
-        response = client.get("/")
-        assert response.status_code == 200
-        assert "text/html" in response.headers["content-type"]
+        with TestClient(app) as client:
+            response = client.get("/")
+            assert response.status_code == 200
+            assert "text/html" in response.headers["content-type"]
+
+    def test_dashboard_html_mentions_auth_required_state(self, test_env_no_auth):
+        from fastapi.testclient import TestClient
+
+        from sandstorm.main import app
+
+        with TestClient(app) as client:
+            response = client.get("/")
+            assert response.status_code == 200
+            assert "Run history is private when API auth is enabled." in response.text
 
 
 class TestRunsEndpoint:
-    def test_runs_returns_json_array(self):
+    def test_runs_returns_json_array(self, test_env_no_auth):
         from fastapi.testclient import TestClient
 
         from sandstorm.main import app
 
-        client = TestClient(app)
-        response = client.get("/runs")
-        assert response.status_code == 200
-        data = response.json()
-        assert isinstance(data, list)
+        with TestClient(app) as client:
+            response = client.get("/runs")
+            assert response.status_code == 200
+            data = response.json()
+            assert isinstance(data, list)
 
-    def test_runs_returns_runs_after_creation(self, tmp_path):
+    def test_runs_returns_runs_after_creation(self, tmp_path, test_env_no_auth):
         """Verify the /runs endpoint surfaces runs from the store."""
         from unittest.mock import patch
 
@@ -266,8 +276,7 @@ class TestRunsEndpoint:
         test_store.create(id="test-2", prompt="world", model=None)
         test_store.complete(id="test-1", cost_usd=0.05, num_turns=2, duration_secs=8.0)
 
-        with patch("sandstorm.main.run_store", test_store):
-            client = TestClient(app)
+        with patch("sandstorm.main.run_store", test_store), TestClient(app) as client:
             response = client.get("/runs")
             assert response.status_code == 200
             data = response.json()

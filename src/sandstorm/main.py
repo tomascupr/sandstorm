@@ -159,7 +159,7 @@ async def dashboard():
     summary="List runs",
     description="Returns recent agent runs, newest first.",
 )
-async def list_runs():
+async def list_runs(token: str | None = Depends(verify_api_token)):
     return run_store.list()
 
 

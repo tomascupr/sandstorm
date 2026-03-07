@@ -126,6 +126,12 @@ class TestOptionalAuth:
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
 
+    def test_runs_work_without_auth(self, client_no_auth):
+        """Run history remains accessible when auth is disabled."""
+        response = client_no_auth.get("/runs")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
 
 class TestSecurityGuarantees:
     """Critical security tests - unauthorized requests must never execute code."""
@@ -157,6 +163,25 @@ class TestHealthEndpoint:
 
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+
+
+class TestRunsEndpointAuth:
+    """Run history should follow the same auth rules as /query."""
+
+    def test_runs_require_auth_when_enabled(self, client):
+        response = client.get("/runs")
+        assert response.status_code == 401
+        assert response.headers["WWW-Authenticate"] == "Bearer"
+
+    def test_runs_accept_valid_token(self, client, valid_token):
+        response = client.get("/runs", headers={"Authorization": f"Bearer {valid_token}"})
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+    def test_dashboard_remains_public_with_auth_enabled(self, client):
+        response = client.get("/")
+        assert response.status_code == 200
+        assert "text/html" in response.headers["content-type"]
 
 
 class TestEdgeCases:
