@@ -55,6 +55,13 @@ ds init security-audit my-audit
 ds init support-triage --force
 ```
 
+Behavior:
+
+- `ds init` opens the guided flow
+- `ds init <starter>` scaffolds into `./<starter-slug>`
+- `ds init <starter> <directory>` scaffolds directly into the provided directory
+- `--force` overwrites starter-managed files in an existing destination
+
 ## Add a bundled toolpack
 
 Install bundled MCP integrations into the current project:
