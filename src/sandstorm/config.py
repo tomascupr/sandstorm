@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
+from dotenv import load_dotenv as _load_dotenv
 
 from .models import NAME_PATTERN, QueryRequest
 
@@ -70,6 +71,25 @@ def _read_project_dotenv() -> dict[str, str]:
     if not env_path.is_file():
         return {}
     return {key: value for key, value in dotenv_values(env_path).items() if value is not None}
+
+
+def _snapshot_project_dotenv() -> dict[str, str]:
+    """Return project .env entries that currently match the process environment."""
+    return {
+        key: value for key, value in _read_project_dotenv().items() if os.environ.get(key) == value
+    }
+
+
+def load_project_dotenv(*args: Any, **kwargs: Any) -> bool:
+    """Load dotenv values and track which project-local keys came from .env."""
+    global _LOADED_DOTENV_VALUES
+
+    if not args and "dotenv_path" not in kwargs and "stream" not in kwargs:
+        kwargs = {**kwargs, "dotenv_path": _get_env_path()}
+
+    loaded = _load_dotenv(*args, **kwargs)
+    _LOADED_DOTENV_VALUES = _snapshot_project_dotenv()
+    return loaded
 
 
 def _refresh_project_dotenv() -> None:

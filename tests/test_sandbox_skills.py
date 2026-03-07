@@ -231,6 +231,11 @@ def _api_keys(monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
 
 
+@pytest.fixture(autouse=True)
+def _reset_loaded_dotenv_values(monkeypatch):
+    monkeypatch.setattr(config_mod, "_LOADED_DOTENV_VALUES", {})
+
+
 def _req(**kwargs) -> QueryRequest:
     kwargs.setdefault("prompt", "test")
     return QueryRequest(**kwargs)
@@ -448,6 +453,34 @@ class TestBuildAgentConfigMcpWhitelist:
         env_path.write_text("LINEAR_API_KEY=new-key\n", encoding="utf-8")
         config, _ = _build_agent_config(_req(), cfg, {})
         assert config["mcp_servers"] == {"linear": {"env": {"LINEAR_API_KEY": "new-key"}}}
+
+    def test_reloads_values_loaded_from_dotenv_at_process_startup(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("LINEAR_API_KEY", raising=False)
+        cfg = {"mcp_servers": {"linear": {"env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"}}}}
+        env_path = tmp_path / ".env"
+
+        env_path.write_text("LINEAR_API_KEY=old-key\n", encoding="utf-8")
+        config_mod.load_project_dotenv()
+
+        env_path.write_text("LINEAR_API_KEY=new-key\n", encoding="utf-8")
+        config, _ = _build_agent_config(_req(), cfg, {})
+
+        assert config["mcp_servers"] == {"linear": {"env": {"LINEAR_API_KEY": "new-key"}}}
+
+    def test_preserves_explicit_process_env_when_dotenv_rotates(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("LINEAR_API_KEY", "shell-key")
+        cfg = {"mcp_servers": {"linear": {"env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"}}}}
+        env_path = tmp_path / ".env"
+
+        env_path.write_text("LINEAR_API_KEY=old-key\n", encoding="utf-8")
+        config_mod.load_project_dotenv()
+
+        env_path.write_text("LINEAR_API_KEY=new-key\n", encoding="utf-8")
+        config, _ = _build_agent_config(_req(), cfg, {})
+
+        assert config["mcp_servers"] == {"linear": {"env": {"LINEAR_API_KEY": "shell-key"}}}
 
     def test_missing_required_placeholder_raises(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

@@ -9,7 +9,6 @@ import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from dotenv import load_dotenv
 from e2b import AuthenticationException, SandboxException
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
 from .auth import load_api_keys, verify_api_token
+from .config import load_project_dotenv as load_dotenv
 from .config import load_sandstorm_config
 from .e2b_api import webhook_request
 from .models import QueryRequest

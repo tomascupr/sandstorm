@@ -11,10 +11,11 @@ import urllib.request
 from pathlib import Path
 
 import click
-from dotenv import dotenv_values, load_dotenv, set_key
+from dotenv import dotenv_values, set_key
 from e2b import AuthenticationException, SandboxException
 
 from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
+from sandstorm.config import load_project_dotenv as load_dotenv
 from sandstorm.e2b_api import E2BApiError, webhook_request
 from sandstorm.starter_catalog import (
     StarterDefinition,
