@@ -165,7 +165,8 @@ function render(runs) {
     </tr></thead><tbody>`;
 
   for (const run of runs) {
-    const dotClass = 'status-' + run.status;
+    const safeStatus = esc(run.status);
+    const dotClass = 'status-' + (run.status || '').replace(/[^a-z]/g, '');
     const duration = run.duration_secs != null ? run.duration_secs.toFixed(1) + 's' : '-';
     const cost = run.cost_usd != null ? '$' + run.cost_usd.toFixed(4) : '-';
     const turns = run.num_turns != null ? run.num_turns : '-';
@@ -173,7 +174,7 @@ function render(runs) {
     const model = run.model || '-';
 
     html += `<tr>
-      <td><span class="status-dot ${dotClass}"></span>${run.status}</td>
+      <td><span class="status-dot ${dotClass}"></span>${safeStatus}</td>
       <td class="run-id">${esc(run.id)}</td>
       <td class="prompt-cell" title="${esc(run.prompt)}">${esc(run.prompt)}</td>
       <td>${esc(model)}</td>
