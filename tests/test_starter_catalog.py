@@ -38,6 +38,14 @@ def test_scaffold_files_adds_focus_sentence():
     assert ".env.example" in files
 
 
+def test_scaffold_files_preserves_template_skills_when_present():
+    starter = resolve_starter("general-assistant")
+    files = scaffold_files(starter)
+    config = json.loads(files["sandstorm.json"])
+
+    assert config["template_skills"] is True
+
+
 def test_scaffold_files_maps_security_skill_path():
     starter = resolve_starter("security-audit")
     files = scaffold_files(starter)
@@ -56,3 +64,17 @@ def test_iter_text_files_raises_helpful_error_for_non_utf8(tmp_path):
 def test_apply_focus_sentence_reports_invalid_json():
     with pytest.raises(ValueError, match="general-assistant"):
         _apply_focus_sentence("general-assistant", "{not json", "focus")
+
+
+def test_apply_focus_sentence_appends_to_existing_system_prompt_append():
+    sandstorm_json = json.dumps(
+        {
+            "system_prompt": "Base prompt",
+            "system_prompt_append": "Existing starter guidance.",
+        }
+    )
+
+    updated = _apply_focus_sentence("general-assistant", sandstorm_json, "Company-specific focus")
+    config = json.loads(updated)
+
+    assert config["system_prompt_append"] == "Existing starter guidance.\n\nCompany-specific focus"

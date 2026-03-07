@@ -284,6 +284,15 @@ def _missing_env_names(env_values: dict[str, str], required_names: list[str]) ->
     return [name for name in required_names if not env_values.get(name)]
 
 
+def _uses_default_openrouter_base_url(env_values: dict[str, str], missing: list[str]) -> bool:
+    """Return True when init will write the default OpenRouter Anthropic-compatible URL."""
+    return (
+        not _get_env_value("ANTHROPIC_BASE_URL")
+        and env_values.get("ANTHROPIC_BASE_URL") == "https://openrouter.ai/api"
+        and ("OPENROUTER_API_KEY" in env_values or "OPENROUTER_API_KEY" in missing)
+    )
+
+
 def _maybe_prompt_for_env_file(destination: Path) -> tuple[bool, list[str]]:
     """Prompt for missing provider settings and optionally write .env."""
     env_path = destination / ".env"
@@ -294,6 +303,9 @@ def _maybe_prompt_for_env_file(destination: Path) -> tuple[bool, list[str]]:
     env_values, missing = _resolve_init_env_values()
     if not missing:
         return False, []
+
+    if _uses_default_openrouter_base_url(env_values, missing):
+        click.echo("Using default OpenRouter base URL: https://openrouter.ai/api")
 
     click.echo("\nAdd the missing provider settings so this starter is runnable right away.\n")
     prompt_names = [name for name in missing if name != "E2B_API_KEY"]

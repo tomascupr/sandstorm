@@ -176,6 +176,32 @@ class TestCli:
             "OPENROUTER_API_KEY=sk-or-test-key",
         ]
 
+    def test_init_interactive_reports_default_openrouter_base_url(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test-key")
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.delenv("E2B_API_KEY", raising=False)
+        _disable_dotenv(monkeypatch)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            ["init"],
+            input=("general-assistant\nUse this for vendor research\ne2b-test-key\n"),
+        )
+
+        starter_dir = tmp_path / "general-assistant"
+        env_lines = (starter_dir / ".env").read_text(encoding="utf-8").splitlines()
+
+        assert result.exit_code == 0
+        assert "Using default OpenRouter base URL: https://openrouter.ai/api" in result.output
+        assert env_lines == [
+            "ANTHROPIC_BASE_URL=https://openrouter.ai/api",
+            "OPENROUTER_API_KEY=sk-or-test-key",
+            "E2B_API_KEY=e2b-test-key",
+        ]
+
     def test_init_explicit_directory_scaffolds_without_prompting(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         _disable_dotenv(monkeypatch)

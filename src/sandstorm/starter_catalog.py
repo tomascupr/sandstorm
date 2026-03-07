@@ -32,7 +32,10 @@ STARTERS: tuple[StarterDefinition, ...] = (
         slug="research-brief",
         title="Research Brief",
         description="Research a topic, compare options, and return a concise decision brief.",
-        next_step_command='ds "Compare Linear, Jira, and Asana for a 50-person product org"',
+        next_step_command=(
+            "ds \"Research Acme's competitors, crawl their sites and recent news, and "
+            'write a one-page branded briefing PDF with sources."'
+        ),
         aliases=("competitive-analysis",),
     ),
     StarterDefinition(
@@ -150,5 +153,9 @@ def _apply_focus_sentence(
         raise ValueError(
             f"Invalid JSON in starter {starter_slug!r} sandstorm.json: {exc}"
         ) from exc
-    config["system_prompt_append"] = focus
+    existing_append = config.get("system_prompt_append")
+    if isinstance(existing_append, str) and existing_append.strip():
+        config["system_prompt_append"] = existing_append.rstrip() + "\n\n" + focus
+    else:
+        config["system_prompt_append"] = focus
     return json.dumps(config, indent=2) + "\n"
