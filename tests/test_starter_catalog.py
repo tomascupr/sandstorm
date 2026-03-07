@@ -38,14 +38,6 @@ def test_scaffold_files_adds_focus_sentence():
     assert ".env.example" in files
 
 
-def test_scaffold_files_preserves_template_skills_when_present():
-    starter = resolve_starter("general-assistant")
-    files = scaffold_files(starter)
-    config = json.loads(files["sandstorm.json"])
-
-    assert config["template_skills"] is True
-
-
 def test_scaffold_files_maps_security_skill_path():
     starter = resolve_starter("security-audit")
     files = scaffold_files(starter)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
+import sandstorm.cli as cli_module
 from sandstorm.cli import cli
 
 
@@ -303,3 +304,42 @@ class TestCli:
         assert not (starter_dir / ".env").exists()
         assert "left blank" in result.output
         assert "ANTHROPIC_API_KEY, E2B_API_KEY" in result.output
+
+    def test_init_sanitizes_newlines_in_env_values(self, tmp_path, monkeypatch):
+        answers = iter(["sk-test\nline2", "e2b-test-key"])
+        starter_dir = tmp_path / "general-assistant"
+        starter_dir.mkdir()
+        monkeypatch.setattr(
+            "sandstorm.cli._resolve_init_env_values",
+            lambda: ({}, ["ANTHROPIC_API_KEY", "E2B_API_KEY"]),
+        )
+        monkeypatch.setattr("sandstorm.cli.click.prompt", lambda *args, **kwargs: next(answers))
+
+        env_written, missing = cli_module._maybe_prompt_for_env_file(starter_dir)
+        env_lines = (starter_dir / ".env").read_text(encoding="utf-8").splitlines()
+
+        assert env_written is True
+        assert missing == []
+        assert env_lines == [
+            "ANTHROPIC_API_KEY=sk-test line2",
+            "E2B_API_KEY=e2b-test-key",
+        ]
+
+    def test_webhook_register_rejects_non_http_url(self, monkeypatch):
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+        _disable_dotenv(monkeypatch)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["webhook", "register", "file:///tmp/webhook"])
+
+        assert result.exit_code == 1
+        assert "URL must use http:// or https://" in result.output
+
+    def test_webhook_test_rejects_non_http_url(self, monkeypatch):
+        _disable_dotenv(monkeypatch)
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["webhook", "test", "file:///tmp/webhook"])
+
+        assert result.exit_code == 1
+        assert "URL must use http:// or https://" in result.output

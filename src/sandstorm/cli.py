@@ -284,6 +284,11 @@ def _missing_env_names(env_values: dict[str, str], required_names: list[str]) ->
     return [name for name in required_names if not env_values.get(name)]
 
 
+def _sanitize_env_value(value: str) -> str:
+    """Flatten embedded newlines so pasted secrets don't corrupt .env format."""
+    return value.replace("\r", " ").replace("\n", " ")
+
+
 def _uses_default_openrouter_base_url(env_values: dict[str, str], missing: list[str]) -> bool:
     """Return True when init will write the default OpenRouter Anthropic-compatible URL."""
     return (
@@ -322,7 +327,11 @@ def _maybe_prompt_for_env_file(destination: Path) -> tuple[bool, list[str]]:
         )
         return False, remaining_missing
 
-    env_lines = [f"{name}={value}" for name, value in env_values.items() if value]
+    env_lines = [
+        f"{name}={_sanitize_env_value(value)}"
+        for name, value in env_values.items()
+        if _sanitize_env_value(value)
+    ]
     if not env_lines:
         return False, missing
     env_path.write_text("\n".join(env_lines) + "\n", encoding="utf-8")
@@ -553,6 +562,13 @@ def _cli_webhook_request(
         raise SystemExit(1) from exc
 
 
+def _require_http_url(url: str) -> None:
+    """Reject non-HTTP webhook URLs before making requests with urllib."""
+    if not url.startswith(("http://", "https://")):
+        click.echo("Error: URL must use http:// or https://", err=True)
+        raise SystemExit(1)
+
+
 @cli.group()
 def webhook() -> None:
     """Manage E2B lifecycle webhooks."""
@@ -574,6 +590,7 @@ def webhook_register(url: str, secret: str | None, e2b_api_key: str | None, no_s
     """
     load_dotenv()
     api_key = _get_e2b_api_key(e2b_api_key)
+    _require_http_url(url)
 
     if not url.rstrip("/").endswith("/webhooks/e2b"):
         url = url.rstrip("/") + "/webhooks/e2b"
@@ -648,6 +665,7 @@ def webhook_delete(webhook_id: str, e2b_api_key: str | None) -> None:
 def webhook_test(url: str, secret: str | None) -> None:
     """Send a test event to a webhook endpoint to verify it's reachable."""
     load_dotenv()
+    _require_http_url(url)
     secret = secret or os.environ.get("SANDSTORM_WEBHOOK_SECRET", "")
 
     payload = json.dumps(
