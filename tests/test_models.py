@@ -74,8 +74,24 @@ class TestFileValidation:
             QueryRequest(prompt="test", files={"../etc/passwd": "evil"})
 
     def test_root_path_rejected(self):
-        with pytest.raises(ValidationError, match="Path traversal not allowed"):
+        with pytest.raises(ValidationError, match="Absolute paths are not allowed"):
             QueryRequest(prompt="test", files={"/": "evil"})
+
+    def test_absolute_path_rejected(self):
+        with pytest.raises(ValidationError, match="Absolute paths are not allowed"):
+            QueryRequest(prompt="test", files={"/tmp/file.txt": "evil"})
+
+    def test_windows_drive_absolute_path_rejected_forward_slashes(self):
+        with pytest.raises(ValidationError, match="Absolute paths are not allowed"):
+            QueryRequest(prompt="test", files={"C:/tmp/file.txt": "evil"})
+
+    def test_windows_drive_absolute_path_rejected_backslashes(self):
+        with pytest.raises(ValidationError, match="Absolute paths are not allowed"):
+            QueryRequest(prompt="test", files={"C:\\tmp\\file.txt": "evil"})
+
+    def test_unc_absolute_path_rejected(self):
+        with pytest.raises(ValidationError, match="Absolute paths are not allowed"):
+            QueryRequest(prompt="test", files={"\\\\server\\share\\file.txt": "evil"})
 
     def test_too_many_files_rejected(self):
         files = {f"file{i}.txt": "content" for i in range(21)}
