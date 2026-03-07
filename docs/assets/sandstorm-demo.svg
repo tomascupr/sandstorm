@@ -50,28 +50,28 @@
     <text x="928" y="190" fill="#D8E5EF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" text-anchor="end">Dashboard</text>
 
     <rect x="128" y="212" width="512" height="78" rx="16" fill="#101C29" stroke="#263D50"/>
-    <text x="152" y="242" fill="#6FD5FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="700">$ ds &quot;Compare pricing pages&quot;</text>
-    <text x="152" y="268" fill="#9AB0C1" font-family="Menlo, Monaco, Consolas, monospace" font-size="16">streaming plan differences and buyer signals</text>
+    <text x="152" y="242" fill="#6FD5FF" font-family="Menlo, Monaco, Consolas, monospace" font-size="18" font-weight="700">$ ds &quot;Research competitors and write briefing.pdf&quot;</text>
+    <text x="152" y="268" fill="#9AB0C1" font-family="Menlo, Monaco, Consolas, monospace" font-size="16">sites, recent news, branded PDF, and source log</text>
 
     <rect x="128" y="312" width="512" height="62" rx="16" fill="#0F1925"/>
     <rect x="146" y="328" width="112" height="28" rx="14" fill="#2E2413"/>
     <text x="164" y="347" fill="#FFB454" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">WEBFETCH</text>
-    <text x="276" y="347" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">pricing, faq, and docs pages</text>
+    <text x="276" y="347" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">competitor sites, launch pages, and recent coverage</text>
 
     <rect x="128" y="388" width="512" height="62" rx="16" fill="#0F1925"/>
     <rect x="146" y="404" width="92" height="28" rx="14" fill="#133243"/>
     <text x="165" y="423" fill="#7DD8FF" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">STREAM</text>
-    <text x="258" y="423" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Pulled plan limits, seat pricing, and enterprise cues.</text>
+    <text x="258" y="423" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Compared launches, pricing, positioning, and buyer cues.</text>
 
     <rect x="128" y="464" width="512" height="62" rx="16" fill="#0F1925"/>
     <rect x="146" y="480" width="88" height="28" rx="14" fill="#1C2C1B"/>
     <text x="166" y="499" fill="#7EE2A8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">WRITE</text>
-    <text x="252" y="499" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">reports/pricing-summary.md</text>
+    <text x="252" y="499" fill="#D6E5F0" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">briefing.pdf + reports/sources.md</text>
 
     <rect x="128" y="546" width="512" height="56" rx="16" fill="#111E2B" stroke="#294154"/>
-    <text x="152" y="580" fill="#EDF4F9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="17" font-weight="700">Completed in 7 turns</text>
-    <text x="330" y="580" fill="#95AABD" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Cost $0.0431</text>
-    <text x="446" y="580" fill="#95AABD" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">1 file</text>
+    <text x="152" y="580" fill="#EDF4F9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="17" font-weight="700">Completed in 11 turns</text>
+    <text x="330" y="580" fill="#95AABD" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">Cost $0.0748</text>
+    <text x="446" y="580" fill="#95AABD" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">2 files</text>
 
     <rect x="712" y="212" width="360" height="46" rx="14" fill="#111D29"/>
     <text x="734" y="241" fill="#91A6B8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">RUN</text>
@@ -85,7 +85,7 @@
     <text x="833" y="311" fill="#7EE2A8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">completed</text>
     <text x="932" y="309" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">sonnet</text>
     <text x="1010" y="309" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">$0.04</text>
-    <text x="734" y="334" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Compare pricing pages and summarize.</text>
+    <text x="734" y="334" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Research competitors and write briefing.pdf.</text>
 
     <rect x="712" y="372" width="360" height="78" rx="18" fill="#101A26"/>
     <text x="734" y="405" fill="#EAF2F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="16">f39d14</text>
@@ -93,7 +93,7 @@
     <text x="835" y="407" fill="#FFB454" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">running</text>
     <text x="932" y="405" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">opus</text>
     <text x="1010" y="405" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">--</text>
-    <text x="734" y="430" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Drafting a repo migration plan.</text>
+    <text x="734" y="430" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Triaging a Zendesk export into actions and owners.</text>
 
     <rect x="712" y="468" width="360" height="78" rx="18" fill="#101A26"/>
     <text x="734" y="501" fill="#EAF2F8" font-family="Menlo, Monaco, Consolas, monospace" font-size="16">b09ef1</text>
@@ -101,7 +101,7 @@
     <text x="834" y="503" fill="#FF8B9A" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">error</text>
     <text x="932" y="501" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">sonnet</text>
     <text x="1010" y="501" fill="#EAF2F8" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="16">--</text>
-    <text x="734" y="526" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Sandbox timeout while indexing docs.</text>
+    <text x="734" y="526" fill="#8FA6B9" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Audit paused while cloning the target repository.</text>
 
     <rect x="712" y="566" width="360" height="34" rx="12" fill="#142332"/>
     <text x="734" y="588" fill="#95ABBD" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="14">Run history shown for the current server process.</text>

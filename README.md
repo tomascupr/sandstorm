@@ -15,11 +15,11 @@ Built on the Claude Agent SDK and E2B.
 
 Sandstorm is for people who want real agent work, not a chat wrapper:
 
-- Compare competitors and write a brief
+- Research Acme's competitors, crawl their sites and recent news, and write a one-page branded briefing PDF with sources
 - Analyze uploaded transcripts or PDFs
 - Triage incoming support tickets
-- Crawl docs and draft an API spec
-- Run a security audit
+- Run a security audit in a fresh sandbox
+- Turn docs into a draft API spec
 
 ## Terminal demo
 
@@ -27,22 +27,21 @@ Sandstorm is for people who want real agent work, not a chat wrapper:
 $ pip install duvo-sandstorm
 $ ds init research-brief
 $ cd research-brief
-$ ds "Compare Linear, Jira, and Asana for a 50-person product org"
+$ ds "Research Acme's competitors, crawl their sites and recent news, and write a one-page branded briefing PDF with sources."
 
-summary: Linear is the best fit for speed and usability, Jira wins on configurability,
-and Asana is the easiest cross-functional rollout.
-recommendations:
-  - Pick Linear for a product-led team that values velocity.
-  - Pick Jira if workflow customization is the top priority.
-  - Keep Asana for broader non-engineering coordination.
-sources:
-  - linear.app
-  - atlassian.com/software/jira
-  - asana.com
+WEBFETCH competitor sites, product pages, and recent coverage
+STREAM compared launches, pricing, positioning, and buyer signals
+WRITE briefing.pdf
+WRITE reports/sources.md
+
+artifacts:
+  - briefing.pdf
+  - reports/sources.md
 ```
 
-The point is not just that an agent can answer. It starts from a runnable starter, gets a fresh
-sandbox, can read files or use the web, streams its work, and tears itself down when the run is done.
+The point is not that an agent can answer a question. It starts from a runnable starter, gets a
+fresh sandbox, can read uploads or crawl the web, writes artifacts like `briefing.pdf`, streams
+its work, and tears itself down when the run is done.
 
 ## 60-second path
 
@@ -75,6 +74,8 @@ ds init security-audit my-audit
 | `support-triage` | Triage support tickets or issue exports | prioritized queue with owners and next steps | `issue-triage` |
 | `api-extractor` | Crawl docs and draft an API summary plus spec | endpoint summary and draft `openapi.yaml` | `docs-to-openapi` |
 | `security-audit` | Run a structured security review | vulnerability report with remediation steps | - |
+
+Need CRM access, ticket systems, or internal APIs? Add custom tools to the sandbox.
 
 ## Why Sandstorm exists
 
