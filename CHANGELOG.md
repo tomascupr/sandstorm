@@ -2,6 +2,20 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.8.0] - 2026-03-07
+
+### Features
+
+- add ds init starters and landing-page README
+- improve onboarding and repo polish (#40)
+- improve DX and code quality
+- Add API token authentication (#6)
+- mount Slack on FastAPI, add file extraction and document tools (#38)
+
+### Other
+
+- Rename project in README (#36)
+
 ## [0.7.1] - 2026-02-20
 
 ### Bug Fixes
@@ -165,5 +179,4 @@ All notable changes to Sandstorm will be documented in this file.
 ### Features
 
 - initial release of Sandstorm v0.1.0
-
 
