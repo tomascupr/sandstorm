@@ -53,6 +53,7 @@ _LOADED_DOTENV_VALUES: dict[str, str] = {}
 
 _config_cache: dict | None = None
 _config_mtime: float = 0.0
+_env_mtime: float = 0.0
 
 
 def _get_config_path() -> Path:
@@ -87,7 +88,7 @@ def load_project_dotenv(*args: Any, **kwargs: Any) -> bool:
     loaded = _load_dotenv(*args, **kwargs)
     _LOADED_DOTENV_VALUES = {
         key: value
-        for key, value in _read_project_dotenv().items()
+        for key, value in current.items()
         if os.environ.get(key) == value
         and (
             key in _LOADED_DOTENV_VALUES
@@ -100,7 +101,16 @@ def load_project_dotenv(*args: Any, **kwargs: Any) -> bool:
 
 def _refresh_project_dotenv() -> None:
     """Hot-reload project .env values while preserving explicit process env vars."""
-    global _LOADED_DOTENV_VALUES
+    global _LOADED_DOTENV_VALUES, _env_mtime
+
+    env_path = _get_env_path()
+    try:
+        mtime = env_path.stat().st_mtime if env_path.is_file() else 0.0
+    except OSError:
+        mtime = 0.0
+    if mtime == _env_mtime and mtime != 0.0:
+        return
+    _env_mtime = mtime
 
     current = _read_project_dotenv()
 

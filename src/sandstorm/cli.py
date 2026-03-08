@@ -15,6 +15,7 @@ from dotenv import dotenv_values, set_key
 from e2b import AuthenticationException, SandboxException
 
 from sandstorm import _LOG_DATEFMT, _LOG_FORMAT, __version__
+from sandstorm.config import _get_config_path
 from sandstorm.config import load_project_dotenv as load_dotenv
 from sandstorm.e2b_api import E2BApiError, webhook_request
 from sandstorm.starter_catalog import (
@@ -103,14 +104,9 @@ def _prompt_for_starter() -> StarterDefinition:
     return resolve_starter(starter_name)
 
 
-def _project_config_path() -> Path:
-    """Return the project-local Sandstorm config path."""
-    return Path.cwd() / "sandstorm.json"
-
-
 def _read_project_config_for_listing() -> tuple[dict | None, str | None]:
     """Read sandstorm.json for informational status output."""
-    config_path = _project_config_path()
+    config_path = _get_config_path()
     if not config_path.exists():
         return None, None
     try:
@@ -124,7 +120,7 @@ def _read_project_config_for_listing() -> tuple[dict | None, str | None]:
 
 def _load_project_config_for_editing() -> tuple[Path, dict]:
     """Load sandstorm.json as a mutable JSON object for CLI edits."""
-    config_path = _project_config_path()
+    config_path = _get_config_path()
     if not config_path.exists():
         raise click.ClickException(
             "sandstorm.json not found in the current directory. "
@@ -396,7 +392,7 @@ def _upsert_env_file(
 ) -> bool:
     """Upsert a key in a dotenv-style file."""
     sanitized = _sanitize_env_value(value)
-    current_values = _read_env_values(path) if path.exists() else {}
+    current_values = _read_env_values(path)
     if name in current_values and current_values[name] == sanitized:
         return False
 

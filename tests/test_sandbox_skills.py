@@ -235,6 +235,7 @@ def _api_keys(monkeypatch):
 @pytest.fixture(autouse=True)
 def _reset_loaded_dotenv_values(monkeypatch):
     monkeypatch.setattr(config_mod, "_LOADED_DOTENV_VALUES", {})
+    monkeypatch.setattr(config_mod, "_env_mtime", 0.0)
 
 
 def _req(**kwargs) -> QueryRequest:

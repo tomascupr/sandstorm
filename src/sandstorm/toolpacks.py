@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -24,7 +23,7 @@ def _thaw_toolpack_value(value: Any) -> Any:
         return {key: _thaw_toolpack_value(item) for key, item in value.items()}
     if isinstance(value, tuple):
         return [_thaw_toolpack_value(item) for item in value]
-    return copy.deepcopy(value)
+    return value
 
 
 @dataclass(frozen=True, slots=True)
