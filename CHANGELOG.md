@@ -2,23 +2,22 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
-## [0.8.0] - 2026-03-07
+## [0.8.0] - 2026-03-11
 
 ### Features
 
-- add starter-first onboarding with `ds init`, guided env setup, and six bundled starter projects
-- add API token auth with key rotation and protect run history on `/runs`
-- add Slack mounting on FastAPI, file extraction, and richer document-processing workflows
-- add a typed async Python client for health checks and SSE query streaming
+- add bundled toolpack installation flow (`ds add linear`) (#44)
+- add ds init starters and landing-page README (#42)
+- improve onboarding and repo polish (#40)
+- improve DX and code quality for GitHub growth (#39)
+- add API token authentication (#6)
+- mount Slack on FastAPI, add file extraction and document tools (#38)
 
-### Documentation
+### Bug Fixes
 
-- rewrite the getting-started, configuration, API, deployment, and examples docs for starter-based workflows
-- document package extras and add a dedicated Python client guide
-
-### CI/CD
-
-- verify distributable builds in normal CI before publish
+- reject absolute file paths in QueryRequest.files (#41)
+- deduplicate config helpers and add mtime guard to dotenv refresh
+- preserve dotenv hot reload after startup
 
 ## [0.7.1] - 2026-02-20
 
