@@ -124,7 +124,12 @@ Attach external tools with [Model Context Protocol](https://modelcontextprotocol
 If you want a bundled integration, use the CLI instead of editing JSON by hand:
 
 ```bash
-ds add linear
+ds add --list              # Show all available toolpacks
+ds add linear              # Issue tracking via Linear
+ds add notion              # Knowledge base via Notion
+ds add firecrawl           # Web scraping via Firecrawl
+ds add exa                 # AI-powered search via Exa
+ds add github              # GitHub repos, issues, and PRs
 ```
 
 `ds add` writes the MCP server entry into `sandstorm.json` for the current project and updates the

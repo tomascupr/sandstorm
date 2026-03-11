@@ -67,12 +67,16 @@ Behavior:
 Install bundled MCP integrations into the current project:
 
 ```bash
-ds add --list
-ds add linear
+ds add --list              # Show all available toolpacks
+ds add linear              # Issue tracking via Linear
+ds add notion              # Knowledge base via Notion
+ds add firecrawl           # Web scraping via Firecrawl
+ds add exa                 # AI-powered search via Exa
+ds add github              # GitHub repos, issues, and PRs
 ```
 
-`ds add linear` updates the current project's `sandstorm.json`, prompts for `LINEAR_API_KEY` when
-needed, writes it to `.env`, and adds `LINEAR_API_KEY=` to `.env.example`.
+Each command updates the current project's `sandstorm.json`, prompts for the required API key when
+needed, writes it to `.env`, and adds a placeholder to `.env.example`.
 
 Behavior:
 
