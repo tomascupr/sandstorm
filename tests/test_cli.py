@@ -658,7 +658,7 @@ class TestCli:
         _disable_dotenv(monkeypatch)
         monkeypatch.setenv(env_var, "test-key")
         (tmp_path / "sandstorm.json").write_text(
-            json.dumps({"model": "sonnet"}),
+            json.dumps({"model": "sonnet", "allowed_tools": ["Read"]}),
             encoding="utf-8",
         )
 
@@ -668,6 +668,7 @@ class TestCli:
         config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
         assert result.exit_code == 0
         assert slug in config["mcp_servers"]
+        assert f"mcp__{slug}__*" in config["allowed_tools"]
         env_lines = (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
         assert any(env_var in line for line in env_lines)
 
