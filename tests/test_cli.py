@@ -99,8 +99,8 @@ class TestCli:
                     "mcp_servers": {
                         "linear": {
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-linear"],
-                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                            "args": ["-y", "linear-mcp"],
+                            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
                         }
                     }
                 }
@@ -365,6 +365,10 @@ class TestCli:
         assert result.exit_code == 0
         assert "linear" in result.output
         assert "LINEAR_API_KEY" in result.output
+        assert "notion" in result.output
+        assert "firecrawl" in result.output
+        assert "exa" in result.output
+        assert "github" in result.output
         assert "no project" in result.output
 
     def test_add_list_marks_installed_toolpack(self, tmp_path, monkeypatch):
@@ -376,8 +380,8 @@ class TestCli:
                     "mcp_servers": {
                         "linear": {
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-linear"],
-                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                            "args": ["-y", "linear-mcp"],
+                            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
                         }
                     }
                 }
@@ -435,8 +439,8 @@ class TestCli:
         assert result.exit_code == 0
         assert config["mcp_servers"]["linear"] == {
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-linear"],
-            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+            "args": ["-y", "linear-mcp"],
+            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
         }
         assert config["allowed_tools"] == ["Read", "mcp__linear__*"]
         assert env_lines == ["LINEAR_API_KEY='lin-api-key'"]
@@ -475,8 +479,8 @@ class TestCli:
                     "mcp_servers": {
                         "linear": {
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-linear"],
-                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                            "args": ["-y", "linear-mcp"],
+                            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
                         }
                     },
                     "allowed_tools": ["Read", "mcp__linear__*"],
@@ -502,8 +506,8 @@ class TestCli:
                     "mcp_servers": {
                         "linear": {
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-linear"],
-                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                            "args": ["-y", "linear-mcp"],
+                            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
                         }
                     },
                     "allowed_tools": ["Read", "mcp__linear__*"],
@@ -552,8 +556,8 @@ class TestCli:
                     "mcp_servers": {
                         "linear": {
                             "command": "npx",
-                            "args": ["-y", "@modelcontextprotocol/server-linear"],
-                            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+                            "args": ["-y", "linear-mcp"],
+                            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
                         }
                     }
                 }
@@ -603,7 +607,7 @@ class TestCli:
                 {
                     "mcp_servers": {
                         "linear": {"command": "custom"},
-                        "github": {"command": "other"},
+                        "unrelated": {"command": "other"},
                     }
                 }
             ),
@@ -617,7 +621,7 @@ class TestCli:
 
         assert result.exit_code == 0
         assert config["mcp_servers"]["linear"]["command"] == "npx"
-        assert config["mcp_servers"]["github"] == {"command": "other"}
+        assert config["mcp_servers"]["unrelated"] == {"command": "other"}
 
     def test_add_rejects_invalid_allowed_tools_shape(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
@@ -639,6 +643,33 @@ class TestCli:
 
         with pytest.raises(TypeError):
             toolpack.mcp_server_config["command"] = "custom"
+
+    @pytest.mark.parametrize(
+        "slug,env_var",
+        [
+            ("notion", "NOTION_TOKEN"),
+            ("firecrawl", "FIRECRAWL_API_KEY"),
+            ("exa", "EXA_API_KEY"),
+            ("github", "GITHUB_TOKEN"),
+        ],
+    )
+    def test_add_installs_new_toolpack(self, tmp_path, monkeypatch, slug, env_var):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv(env_var, "test-key")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps({"model": "sonnet"}),
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["add", slug])
+
+        config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
+        assert result.exit_code == 0
+        assert slug in config["mcp_servers"]
+        env_lines = (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
+        assert any(env_var in line for line in env_lines)
 
     def test_webhook_register_rejects_non_http_url(self, monkeypatch):
         monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")

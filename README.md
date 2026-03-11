@@ -97,16 +97,20 @@ Need CRM access, ticket systems, or internal APIs? Add custom tools to the sandb
 Use `ds add` to install bundled MCP integrations into the current project:
 
 ```bash
-ds add --list
-ds add linear
+ds add --list              # Show all available toolpacks
+ds add linear              # Issue tracking via Linear
+ds add notion              # Knowledge base via Notion
+ds add firecrawl           # Web scraping via Firecrawl
+ds add exa                 # AI-powered search via Exa
+ds add github              # GitHub repos, issues, and PRs
 ```
 
-`ds add linear` updates `sandstorm.json`, writes `LINEAR_API_KEY` to `.env`, adds
-`LINEAR_API_KEY=` to `.env.example`, and future CLI/API/Slack runs from that project expose the
-Linear MCP server in the sandboxed agent runtime.
+Each command updates `sandstorm.json`, writes the required API key to `.env` and `.env.example`,
+and future CLI/API/Slack runs from that project expose the MCP server in the sandboxed agent
+runtime.
 
-If the project already has a different `mcp_servers.linear` block, `ds add linear` stops instead
-of overwriting it. Re-run with `ds add linear --force` to replace that MCP server entry.
+If the project already has a different entry for that MCP server, `ds add` stops instead
+of overwriting it. Re-run with `--force` to replace the existing config.
 
 ## Why Sandstorm exists
 

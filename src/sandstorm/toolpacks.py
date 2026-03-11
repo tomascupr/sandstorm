@@ -53,10 +53,64 @@ TOOLPACKS: tuple[ToolpackDefinition, ...] = (
         mcp_server_name="linear",
         mcp_server_config={
             "command": "npx",
-            "args": ["-y", "@modelcontextprotocol/server-linear"],
-            "env": {"LINEAR_API_KEY": "${LINEAR_API_KEY}"},
+            "args": ["-y", "linear-mcp"],
+            # linear-mcp expects LINEAR_ACCESS_TOKEN; map from LINEAR_API_KEY
+            # to avoid breaking existing .env files from the old server package.
+            "env": {"LINEAR_ACCESS_TOKEN": "${LINEAR_API_KEY}"},
         },
         allowed_tools=("mcp__linear__*",),
+    ),
+    ToolpackDefinition(
+        slug="notion",
+        title="Notion",
+        description="Read and search Notion pages, databases, and data sources.",
+        required_env_vars=("NOTION_TOKEN",),
+        mcp_server_name="notion",
+        mcp_server_config={
+            "command": "npx",
+            "args": ["-y", "@notionhq/notion-mcp-server"],
+            "env": {"NOTION_TOKEN": "${NOTION_TOKEN}"},
+        },
+        allowed_tools=("mcp__notion__*",),
+    ),
+    ToolpackDefinition(
+        slug="firecrawl",
+        title="Firecrawl",
+        description="Scrape, crawl, and extract structured data from websites.",
+        required_env_vars=("FIRECRAWL_API_KEY",),
+        mcp_server_name="firecrawl",
+        mcp_server_config={
+            "command": "npx",
+            "args": ["-y", "firecrawl-mcp"],
+            "env": {"FIRECRAWL_API_KEY": "${FIRECRAWL_API_KEY}"},
+        },
+        allowed_tools=("mcp__firecrawl__*",),
+    ),
+    ToolpackDefinition(
+        slug="exa",
+        title="Exa",
+        description="AI-powered web search, code search, and company research.",
+        required_env_vars=("EXA_API_KEY",),
+        mcp_server_name="exa",
+        mcp_server_config={
+            "command": "npx",
+            "args": ["-y", "exa-mcp-server"],
+            "env": {"EXA_API_KEY": "${EXA_API_KEY}"},
+        },
+        allowed_tools=("mcp__exa__*",),
+    ),
+    ToolpackDefinition(
+        slug="github",
+        title="GitHub",
+        description="Search repos, code, issues, and pull requests on GitHub.",
+        required_env_vars=("GITHUB_TOKEN",),
+        mcp_server_name="github",
+        mcp_server_config={
+            "command": "npx",
+            "args": ["-y", "@fre4x/github"],
+            "env": {"GITHUB_TOKEN": "${GITHUB_TOKEN}"},
+        },
+        allowed_tools=("mcp__github__*",),
     ),
 )
 
