@@ -2,6 +2,16 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.8.1] - 2026-03-12
+
+### Features
+
+- add Notion, Firecrawl, Exa, and GitHub toolpacks (#46)
+
+### Bug Fixes
+
+- fix Linear toolpack — migrate from removed `@modelcontextprotocol/server-linear` to `linear-mcp`
+
 ## [0.8.0] - 2026-03-11
 
 ### Features

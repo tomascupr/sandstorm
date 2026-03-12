@@ -1,6 +1,6 @@
 [project]
 name = "duvo-sandstorm"
-version = "0.8.0"
+version = "0.8.1"
 description = "Open-source runtime for general-purpose AI agents in isolated sandboxes."
 keywords = ["ai-agents", "anthropic", "claude", "e2b", "fastapi", "openrouter", "sandbox", "slack"]
 readme = "README.md"
