@@ -113,14 +113,35 @@ ds slack start             # Socket Mode (dev), use --http for production
 Once installed:
 
 - `@Sandstorm review PR 123 in owner/repo`: agent picks up context, runs tests, posts review
-- `/remember shipping address is Berlin`: persisted per-user, per-workspace memory
-- `/forget shipping address`: case-insensitive substring delete
-- `/memories`: list what the bot remembers
+- `/remember shipping address is Berlin`: personal memory
+- `/team-remember shipping address is Berlin`: workspace-wide memory (v0.9.1)
+- `/channel-remember on-call rotation`: channel-scoped memory (v0.9.1)
+- `/cancel`: stop the most recent in-flight run in this channel (v0.9.1)
 - `/model claude-haiku-4-5-20251001`: per-thread model override
+- Reaction triggers: add an emoji to any message to fire an agent (v0.9.1, see [docs/triggers.md](docs/triggers.md))
+- App Home tab shows memories, active runs, channel defaults, and triggers (v0.9.1)
 
 Thread continuity is real: each thread keeps its own paused E2B sandbox, so uploaded files,
 generated outputs, and installed packages survive across messages, even across server restarts.
 See [docs/memory.md](docs/memory.md).
+
+## Triggers (v0.9.1)
+
+Fire agent runs from cron schedules, inbound webhooks, or Slack reactions:
+
+```json
+"triggers": [
+  {"name": "standup", "type": "cron", "schedule": "0 9 * * MON-FRI", "prompt": "Post standup"},
+  {"name": "issue-triage", "type": "webhook", "path": "/triggers/gh",
+   "secret": "${GH_SECRET}", "prompt": "Triage: {{body.issue.title}}"},
+  {"name": "summarize-on-robot", "type": "reaction", "emoji": "robot_face",
+   "prompt": "Summarize {{message.text}}"}
+]
+```
+
+Sub-hourly cron supported (Claude Code Routines enforces a 1-hour minimum).
+See [docs/triggers.md](docs/triggers.md) and [docs/managed-agents-interop.md](docs/managed-agents-interop.md)
+for the MA interop patterns.
 
 ## Pick a starter
 
@@ -139,13 +160,22 @@ See [docs/memory.md](docs/memory.md).
 ## Add toolpacks
 
 ```bash
-ds add --list      # available: linear, notion, firecrawl, exa, github
+ds add --list                                   # bundled: linear, notion, firecrawl, exa, github
 ds add linear
 ds add github
 ```
 
-Each command wires the MCP server into `sandstorm.json`, seeds `.env.example` with the
-required API key, and makes the tools available to CLI / API / Slack runs from that project.
+For any MCP server not in the bundled catalog, `ds add --custom` wires it in
+one command without hand-editing `sandstorm.json` (v0.9.1):
+
+```bash
+ds add --custom hubspot --package @hubspot/mcp-server --env PRIVATE_APP_ACCESS_TOKEN
+ds add --custom zapier --package mcp-remote --arg https://mcp.zapier.app/mcp --env ZAPIER_MCP_TOKEN
+ds add --custom postgres --runtime uvx --package postgres-mcp --env DATABASE_URI
+```
+
+See [docs/custom-mcps.md](docs/custom-mcps.md) for npm / mcp-remote / uvx patterns
+and the trust-boundary note on running arbitrary MCP packages inside your sandbox.
 
 ## Replay a run with a different model
 
