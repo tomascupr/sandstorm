@@ -2,6 +2,19 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.9.2] - 2026-04-17
+
+### Bug Fixes
+
+- ci: add package-lock.json so npm publish workflow can run (#50)
+- ci: pypi publish skip-existing for release retryability (#51)
+
+No user-facing changes. v0.9.2 exists because v0.9.1's GitHub release
+was locked immutable before the publish workflow finished; this tag
+re-runs the workflow so `@duvo/sandstorm-client@0.9.2` lands on npm
+alongside `duvo-sandstorm==0.9.2` on PyPI. Code content identical to
+v0.9.1.
+
 ## [0.9.1] - 2026-04-17
 
 ### Bug Fixes
