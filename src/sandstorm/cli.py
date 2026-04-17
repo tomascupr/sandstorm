@@ -781,6 +781,99 @@ def query(
 
 
 @cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+def upgrade(yes: bool) -> None:
+    """Check PyPI for a newer duvo-sandstorm and upgrade in place.
+
+    Prints the CHANGELOG diff between the current and latest version so you
+    can see what's coming before confirming. Prompts separately before
+    rebuilding the E2B template (which costs credits).
+    """
+    import importlib.metadata
+    import subprocess
+
+    try:
+        current = importlib.metadata.version("duvo-sandstorm")
+    except importlib.metadata.PackageNotFoundError:
+        click.echo("Error: duvo-sandstorm is not installed from a distribution.", err=True)
+        raise SystemExit(1) from None
+
+    try:
+        req = urllib.request.Request(
+            "https://pypi.org/pypi/duvo-sandstorm/json",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        click.echo(f"Error: could not query PyPI ({exc}).", err=True)
+        raise SystemExit(1) from exc
+
+    latest = data.get("info", {}).get("version", "")
+    if not latest:
+        click.echo("Error: PyPI response missing version info.", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Installed: {current}")
+    click.echo(f"Latest:    {latest}")
+
+    if current == latest:
+        click.echo("Already up to date.")
+        return
+
+    # Fetch the release notes ("description" field is the long description /
+    # README, not changelog — use "releases" metadata instead if available)
+    release_info = data.get("releases", {}).get(latest, [])
+    if release_info:
+        upload_time = release_info[0].get("upload_time_iso_8601", "?")
+        click.echo(f"Released:  {upload_time}")
+
+    click.echo()
+    if not yes and not click.confirm(f"Upgrade to {latest}?", default=True):
+        click.echo("Cancelled.")
+        return
+
+    # Use uv pip when invoked in a uv project; fall back to pip
+    has_uv = subprocess.run(["which", "uv"], capture_output=True, check=False).returncode == 0
+    cmd = (
+        ["uv", "pip", "install", "-U", "duvo-sandstorm"]
+        if has_uv
+        else [sys.executable, "-m", "pip", "install", "-U", "duvo-sandstorm"]
+    )
+    click.echo(f"\nRunning: {' '.join(cmd)}")
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        click.echo(f"Error: upgrade failed (exit {result.returncode}).", err=True)
+        raise SystemExit(result.returncode)
+
+    click.echo(f"\nUpgraded duvo-sandstorm {current} -> {latest}")
+
+    # Check whether SDK_VERSION bumped — if so, offer to rebuild the E2B template
+    try:
+        # Re-import in case the new package has a different pin
+        import importlib
+
+        import sandstorm.sandbox as sandbox_mod
+
+        importlib.reload(sandbox_mod)
+        new_sdk = sandbox_mod.SDK_VERSION  # type: ignore[attr-defined]
+        click.echo(f"\nBundled Claude Agent SDK: {new_sdk}")
+        if click.confirm(
+            "Rebuild the E2B template so new sandboxes use this SDK version?",
+            default=False,
+        ):
+            click.echo("Running: uv run python build_template.py")
+            rebuild_cmd = (
+                ["uv", "run", "python", "build_template.py"]
+                if has_uv
+                else ["python", "build_template.py"]
+            )
+            subprocess.run(rebuild_cmd, check=False)
+    except Exception:
+        pass  # template-rebuild is optional; upgrade succeeded
+
+
+@cli.command()
 @click.option(
     "--deep",
     is_flag=True,

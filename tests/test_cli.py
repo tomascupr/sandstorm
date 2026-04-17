@@ -702,6 +702,69 @@ class TestCli:
         assert "URL must use http:// or https://" in result.output
 
 
+class TestUpgrade:
+    def test_upgrade_already_at_latest(self, monkeypatch):
+        import importlib.metadata
+
+        from sandstorm.cli import cli
+
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setattr(importlib.metadata, "version", lambda _: "1.2.3")
+
+        import io
+        import json as _json
+        from unittest.mock import patch
+
+        class _FakeResp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps({"info": {"version": "1.2.3"}, "releases": {}}).encode()
+
+        with patch("urllib.request.urlopen", return_value=_FakeResp()):
+            result = CliRunner().invoke(cli, ["upgrade"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+    def test_upgrade_prompts_before_install(self, monkeypatch):
+        import importlib.metadata
+
+        from sandstorm.cli import cli
+
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setattr(importlib.metadata, "version", lambda _: "0.8.1")
+
+        import io
+        import json as _json
+        from unittest.mock import patch
+
+        class _FakeResp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps(
+                    {
+                        "info": {"version": "0.9.0"},
+                        "releases": {"0.9.0": [{"upload_time_iso_8601": "2026-04-17T00:00:00Z"}]},
+                    }
+                ).encode()
+
+        with patch("urllib.request.urlopen", return_value=_FakeResp()):
+            # Answer "n" to the upgrade prompt — no install runs
+            result = CliRunner().invoke(cli, ["upgrade"], input="n\n")
+        assert result.exit_code == 0
+        assert "0.9.0" in result.output
+        assert "Cancelled" in result.output
+
+
 class TestReplay:
     def test_replay_unknown_id_exits_with_error(self, tmp_path, monkeypatch):
         _disable_dotenv(monkeypatch)
