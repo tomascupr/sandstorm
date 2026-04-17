@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import urllib.error
@@ -418,6 +419,42 @@ def _resolve_toolpack_env_vars(toolpack: ToolpackDefinition) -> dict[str, str]:
     return values
 
 
+_CUSTOM_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def _build_custom_toolpack(
+    *,
+    slug: str,
+    package: str,
+    runtime: str,
+    envs: tuple[str, ...],
+    args: tuple[str, ...],
+) -> ToolpackDefinition:
+    """Build an ad-hoc ToolpackDefinition from `ds add --custom` flags."""
+    if not _CUSTOM_SLUG_PATTERN.match(slug):
+        raise click.BadParameter(
+            f"--custom slug {slug!r} must match {_CUSTOM_SLUG_PATTERN.pattern} "
+            "(lower-case, digits, underscore, dash).",
+            param_hint="--custom",
+        )
+    # npx always wants a -y to skip the prompt; uvx runs the package directly.
+    runtime_cmd = runtime.lower()
+    command_args = ["-y", package, *args] if runtime_cmd == "npx" else [package, *args]
+    env_map = {name: f"${{{name}}}" for name in envs}
+    return ToolpackDefinition(
+        slug=slug,
+        title=slug,
+        description=f"Custom MCP server: {runtime_cmd} {package}",
+        required_env_vars=tuple(envs),
+        mcp_server_name=slug,
+        mcp_server_config={
+            "command": runtime_cmd,
+            "args": command_args,
+            "env": env_map,
+        },
+    )
+
+
 def _install_toolpack_config(
     config: dict,
     toolpack: ToolpackDefinition,
@@ -624,23 +661,79 @@ def init(starter_name: str | None, directory: Path | None, show_list: bool, forc
     is_flag=True,
     help="Overwrite the toolpack's existing MCP server config when it differs.",
 )
-def add(toolpack_name: str | None, show_list: bool, force: bool) -> None:
-    """Install a bundled toolpack into the current Sandstorm project."""
+@click.option(
+    "--custom",
+    "custom_slug",
+    default=None,
+    help=(
+        "Wire an arbitrary MCP server under this slug (e.g. --custom zapier). "
+        "Use with --package plus --env / --arg / --runtime."
+    ),
+)
+@click.option(
+    "--package",
+    "custom_package",
+    default=None,
+    help="Package name for --custom (npm package for npx, or PyPI name for uvx).",
+)
+@click.option(
+    "--runtime",
+    "custom_runtime",
+    type=click.Choice(["npx", "uvx"], case_sensitive=False),
+    default="npx",
+    show_default=True,
+    help="Runtime command for --custom (npx or uvx).",
+)
+@click.option(
+    "--env",
+    "custom_envs",
+    multiple=True,
+    help="Env var the custom server needs (repeatable). Added to .env.example.",
+)
+@click.option(
+    "--arg",
+    "custom_args",
+    multiple=True,
+    help="Extra positional arg passed after the package (repeatable).",
+)
+def add(
+    toolpack_name: str | None,
+    show_list: bool,
+    force: bool,
+    custom_slug: str | None,
+    custom_package: str | None,
+    custom_runtime: str,
+    custom_envs: tuple[str, ...],
+    custom_args: tuple[str, ...],
+) -> None:
+    """Install a bundled toolpack, or wire an arbitrary MCP with --custom."""
     load_dotenv()
 
     if show_list:
-        if toolpack_name:
+        if toolpack_name or custom_slug:
             raise click.UsageError("--list cannot be combined with a toolpack name.")
         _print_toolpack_list()
         return
 
-    if not toolpack_name:
-        raise click.UsageError("Provide a toolpack name or use --list.")
-
-    try:
-        toolpack = resolve_toolpack(toolpack_name)
-    except ValueError as exc:
-        raise click.BadParameter(str(exc), param_hint="toolpack") from exc
+    if custom_slug:
+        if toolpack_name:
+            raise click.UsageError("Provide either a bundled toolpack name OR --custom, not both.")
+        if not custom_package:
+            raise click.UsageError("--custom requires --package.")
+        toolpack = _build_custom_toolpack(
+            slug=custom_slug,
+            package=custom_package,
+            runtime=custom_runtime,
+            envs=custom_envs,
+            args=custom_args,
+        )
+    elif toolpack_name:
+        try:
+            toolpack = resolve_toolpack(toolpack_name)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="toolpack") from exc
+    else:
+        raise click.UsageError("Provide a toolpack name, --custom, or --list.")
 
     config_path, config = _load_project_config_for_editing()
     has_allowed_tools = "allowed_tools" in config
