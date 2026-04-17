@@ -8,6 +8,10 @@ features:
   bot_user:
     display_name: Sandstorm
     always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+    messages_tab_read_only_enabled: false
   assistant_view:
     assistant_description: "General-purpose AI agent powered by Claude — runs tasks in isolated sandboxes"
     suggested_prompts:
@@ -19,19 +23,30 @@ features:
         message: "Draft a summary from this document..."
   slash_commands:
     - command: /remember
-      description: Remember a fact for your future Sandstorm agent runs
+      description: Remember a personal fact for your future Sandstorm agent runs
       usage_hint: "likes oat milk"
       should_escape: false
+    - command: /team-remember
+      description: Remember a fact for the whole tenant (visible to every user)
+      usage_hint: "we ship to Berlin"
+      should_escape: false
+    - command: /channel-remember
+      description: Remember a fact scoped to the current channel
+      usage_hint: "our on-call rotation is Mon-Fri"
+      should_escape: false
     - command: /forget
-      description: Forget any remembered fact containing a substring
+      description: Forget any remembered fact containing a substring (optional scope filter)
       usage_hint: "oat milk"
       should_escape: false
     - command: /memories
-      description: List the facts Sandstorm remembers for you
+      description: List the facts Sandstorm remembers (optional scope filter)
       should_escape: false
     - command: /model
       description: Override the model used for this thread (ephemeral until restart)
       usage_hint: "claude-haiku-4-5-20251001 | clear"
+      should_escape: false
+    - command: /cancel
+      description: Cancel the most recent in-flight run in this channel
       should_escape: false
 oauth_config:
   scopes:
@@ -44,7 +59,9 @@ oauth_config:
       - groups:history
       - im:history
       - files:read
+      - reactions:read
       - reactions:write
+      - users:read
       - commands
 settings:
   event_subscriptions:
@@ -53,6 +70,8 @@ settings:
       - assistant_thread_started
       - assistant_thread_context_changed
       - message.im
+      - reaction_added
+      - app_home_opened
   interactivity:
     is_enabled: true
   socket_mode_enabled: true

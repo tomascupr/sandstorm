@@ -197,6 +197,23 @@ class RunStore:
                 return run
         return None
 
+    def find_in_flight_run(
+        self, team_id: str | None, channel_id: str, thread_ts: str
+    ) -> Run | None:
+        """Return the most recent running Run in this Slack thread, if any.
+
+        Used by the /cancel slash command and App Home to find the run the
+        user wants to cancel in the current thread.
+        """
+        return self.find_most_recent(
+            lambda r: (
+                r.team_id == team_id
+                and r.channel_id == channel_id
+                and r.thread_ts == thread_ts
+                and r.status == "running"
+            )
+        )
+
     def find_thread_session(
         self, team_id: str | None, channel_id: str, thread_ts: str
     ) -> Run | None:

@@ -134,6 +134,135 @@ class TestJsonlPersistence:
         assert [m.text for m in store.list("T1", "U1")] == ["valid"]
 
 
+class TestThreeLevelScope:
+    def test_team_scope_shared_across_users(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "company holiday Monday", scope="team")
+
+        # Different user in the same team sees the team fact
+        seen_by_other = store.list("T1", "UB", scope="team")
+        assert [m.text for m in seen_by_other] == ["company holiday Monday"]
+
+        # Different team does NOT see it
+        other_team = store.list("T2", "UA", scope="team")
+        assert other_team == []
+
+    def test_channel_scope_isolation(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "support rotation", scope="channel", channel_id="C_SUPPORT")
+        store.remember("T1", "UA", "eng rotation", scope="channel", channel_id="C_ENG")
+
+        support_view = store.list("T1", "UB", scope="channel", channel_id="C_SUPPORT")
+        assert [m.text for m in support_view] == ["support rotation"]
+        # Different channel, same user: no crossover
+        eng_view = store.list("T1", "UB", scope="channel", channel_id="C_ENG")
+        assert [m.text for m in eng_view] == ["eng rotation"]
+
+    def test_channel_scope_requires_channel_id(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        with pytest.raises(ValueError, match="channel_id"):
+            store.remember("T1", "U1", "x", scope="channel")
+
+    def test_combined_prefix_orders_team_channel_user(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "user fact", scope="user")
+        store.remember("T1", "UA", "channel fact", scope="channel", channel_id="C1")
+        store.remember("T1", "UA", "team fact", scope="team")
+        prefix = store.as_prompt_prefix("T1", "UA", channel_id="C1")
+        assert prefix.index("team fact") < prefix.index("channel fact")
+        assert prefix.index("channel fact") < prefix.index("user fact")
+
+    def test_list_combined_view_without_channel_id_skips_channel(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "team fact", scope="team")
+        store.remember("T1", "UA", "channel fact", scope="channel", channel_id="C1")
+        store.remember("T1", "UA", "user fact", scope="user")
+        # No channel_id = no channel memories visible
+        seen = store.list("T1", "UA")
+        assert "channel fact" not in [m.text for m in seen]
+        assert {m.text for m in seen} == {"team fact", "user fact"}
+
+    def test_forget_scoped_filter(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "shared holiday", scope="team")
+        store.remember("T1", "UA", "my preference holiday", scope="user")
+        # Forget only user-scoped
+        deleted = store.forget("T1", "UA", "holiday", scope="user")
+        assert deleted == 1
+        team_still = [m.text for m in store.list("T1", "UA", scope="team")]
+        assert team_still == ["shared holiday"]
+
+    def test_forget_by_id_requires_ownership(self, tmp_path):
+        """UI callers that receive a memory_id from a payload must only be
+        able to tombstone their own memories. Used by the App Home Forget
+        button to prevent cross-user deletion."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        alice = store.remember("T1", "UA", "alice fact", scope="user")
+        bob = store.remember("T1", "UB", "bob fact", scope="user")
+
+        # Alice can delete her own
+        assert store.forget_by_id(alice.id, team_id="T1", user_id="UA") is True
+        assert alice.deleted is True
+
+        # Alice cannot delete Bob's by guessing his id
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UA") is False
+        assert bob.deleted is False
+
+        # Different tenant cannot delete either
+        assert store.forget_by_id(bob.id, team_id="T2", user_id="UB") is False
+        assert bob.deleted is False
+
+    def test_forget_team_requires_author_match(self, tmp_path):
+        """Team memories are shared, but only the original author can delete.
+        This keeps one tenant member from wiping another's workspace-wide
+        knowledge via `/forget team <text>`."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "alice team fact", scope="team")
+        store.remember("T1", "UB", "bob team fact", scope="team")
+
+        # Alice cannot delete Bob's team memory by matching text substring
+        deleted = store.forget("T1", "UA", "bob", scope="team")
+        assert deleted == 0
+        still_visible = {m.text for m in store.list("T1", "UB", scope="team")}
+        assert "bob team fact" in still_visible
+
+        # Alice CAN delete her own team memory
+        deleted = store.forget("T1", "UA", "alice", scope="team")
+        assert deleted == 1
+
+    def test_forget_by_id_team_scope_requires_author(self, tmp_path):
+        """Team-scoped forget_by_id must also gate by author, so a forged
+        memory_id from a Block Kit payload can't cross-delete."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        bob = store.remember("T1", "UB", "bob team fact", scope="team")
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UA", scope="team") is False
+        assert bob.deleted is False
+        # But Bob himself can
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UB", scope="team") is True
+        assert bob.deleted is True
+
+    def test_back_compat_loads_pre_v091_rows(self, tmp_path):
+        """Old JSONL rows without scope/channel_id default to user scope."""
+        path = tmp_path / "m.jsonl"
+        pre_v091 = {
+            "id": "abc",
+            "team_id": "T1",
+            "user_id": "UA",
+            "text": "old school",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "deleted": False,
+        }
+        import json as _json
+
+        path.write_text(_json.dumps(pre_v091) + "\n")
+
+        store = MemoryStore(path=path)
+        seen = store.list("T1", "UA", scope="user")
+        assert [m.text for m in seen] == ["old school"]
+        assert seen[0].scope == "user"
+        assert seen[0].channel_id is None
+
+
 class TestDequeEviction:
     def test_maxlen_evicts_oldest(self, tmp_path):
         store = MemoryStore(path=tmp_path / "m.jsonl", maxlen=3)

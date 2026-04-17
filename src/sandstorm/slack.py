@@ -108,11 +108,13 @@ def _build_query_request(
     team_id: str | None = None,
     user_id: str | None = None,
     model: str | None = None,
+    channel_id: str | None = None,
 ) -> QueryRequest:
     """Build QueryRequest from prompt, deferring model/timeout to sandstorm.json.
 
-    When team_id/user_id are passed, the server-side memory injection in
-    config._build_agent_config will scope remembered context to that user.
+    When team_id/user_id/channel_id are passed, the server-side memory
+    injection in config._build_agent_config scopes the three-level memory
+    (team + channel + user) appropriately.
 
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
@@ -128,6 +130,7 @@ def _build_query_request(
         max_turns=None,
         team_id=team_id,
         user_id=user_id,
+        channel_id=channel_id,
     )
 
 
@@ -591,13 +594,24 @@ def create_slack_app(
         model_override = _thread_model_overrides.get(
             (team_id or "", channel, f"user:{user_id or ''}")
         )
+        # Per-channel overlay (model / starter / allowed_tools). Explicit user
+        # overrides via /model still win because they are applied afterwards.
+        from .channels import resolve_channel_config
+        from .config import load_sandstorm_config
+
+        overlay = resolve_channel_config(load_sandstorm_config(), channel)
+        overlay_model = overlay.get("model") if overlay else None
+        overlay_allowed_tools = overlay.get("allowed_tools") if overlay else None
         request = _build_query_request(
             full_prompt,
             text_files or None,
             team_id=team_id,
             user_id=user_id,
-            model=model_override,
+            model=model_override or overlay_model,
+            channel_id=channel,
         )
+        if overlay_allowed_tools is not None and request.allowed_tools is None:
+            request.allowed_tools = list(overlay_allowed_tools)
 
         prior_run = run_store.find_thread_session(team_id, channel, thread_ts)
         if prior_run and prior_run.agent_session_id:
@@ -792,7 +806,21 @@ def create_slack_app(
             await say("Please provide a prompt.")
             return
 
-        await set_status("Spinning up sandbox...")
+        # bolt-python 1.28 lets set_status rotate through a list of loading
+        # messages so the user sees visible progress instead of a single static
+        # status. Fall through to the positional form on older bolt versions.
+        try:
+            await set_status(
+                status="Spinning up sandbox...",
+                loading_messages=[
+                    "Warming up the sandbox...",
+                    "Pulling thread context...",
+                    "Running tools...",
+                    "Writing the answer...",
+                ],
+            )
+        except TypeError:
+            await set_status("Spinning up sandbox...")
         run_id = uuid.uuid4().hex[:8]
         tenant = context.get("enterprise_id") or context.get("team_id")
         request, binary_files = await _prepare_prompt(
@@ -878,6 +906,18 @@ def create_slack_app(
         tenant = command.get("enterprise_id") or command.get("team_id")
         return tenant, command.get("user_id")
 
+    def _parse_scope_filter(text: str) -> tuple[str, str | None]:
+        """Split `/memories team` or `/forget foo channel` into (remainder, scope)."""
+        stripped = text.strip()
+        for word in ("team", "channel", "user"):
+            if stripped == word:
+                return "", word
+            if stripped.startswith(word + " "):
+                return stripped[len(word) + 1 :].strip(), word
+            if stripped.endswith(" " + word):
+                return stripped[: -(len(word) + 1)].strip(), word
+        return stripped, None
+
     @app.command("/remember")
     async def handle_remember(ack, command, respond):
         await ack()
@@ -886,23 +926,64 @@ def create_slack_app(
             await respond(text="Usage: `/remember <fact>`. Example: `/remember likes oat milk`.")
             return
         team_id, user_id = _command_scope(command)
-        memory_store.remember(team_id, user_id, text)
-        await respond(text=f"Remembered: _{text}_")
+        memory_store.remember(team_id, user_id, text, scope="user")
+        await respond(text=f"Remembered (user): _{text}_")
+
+    @app.command("/team-remember")
+    async def handle_team_remember(ack, command, respond):
+        await ack()
+        text = (command.get("text") or "").strip()
+        if not text:
+            await respond(
+                text="Usage: `/team-remember <fact>`. Example: `/team-remember we ship to Berlin`."
+            )
+            return
+        team_id, user_id = _command_scope(command)
+        memory_store.remember(team_id, user_id, text, scope="team")
+        await respond(text=f"Remembered (team): _{text}_")
+
+    @app.command("/channel-remember")
+    async def handle_channel_remember(ack, command, respond):
+        await ack()
+        text = (command.get("text") or "").strip()
+        channel_id = command.get("channel_id") or ""
+        if not text:
+            await respond(
+                text=(
+                    "Usage: `/channel-remember <fact>`. "
+                    "Visible to everyone who uses Sandstorm in this channel."
+                )
+            )
+            return
+        if not channel_id:
+            await respond(text="Channel-scoped memory requires a channel context.")
+            return
+        team_id, user_id = _command_scope(command)
+        memory_store.remember(team_id, user_id, text, scope="channel", channel_id=channel_id)
+        await respond(text=f"Remembered (channel): _{text}_")
 
     @app.command("/forget")
     async def handle_forget(ack, command, respond):
         await ack()
-        substring = (command.get("text") or "").strip()
+        raw = (command.get("text") or "").strip()
+        substring, scope_filter = _parse_scope_filter(raw)
         if not substring:
             await respond(
                 text=(
-                    "Usage: `/forget <substring>`. Example: `/forget oat milk`."
-                    " Forgets every memory whose text contains the substring (case-insensitive)."
+                    "Usage: `/forget <substring> [user|channel|team]`. "
+                    "Omit the scope to match all visible memories."
                 )
             )
             return
         team_id, user_id = _command_scope(command)
-        deleted = memory_store.forget(team_id, user_id, substring)
+        channel_id = command.get("channel_id") or None
+        deleted = memory_store.forget(
+            team_id,
+            user_id,
+            substring,
+            scope=scope_filter,  # type: ignore[arg-type]
+            channel_id=channel_id,
+        )
         if deleted:
             await respond(text=f"Forgot {deleted} memor{'y' if deleted == 1 else 'ies'}.")
         else:
@@ -911,13 +992,24 @@ def create_slack_app(
     @app.command("/memories")
     async def handle_memories(ack, command, respond):
         await ack()
+        raw = (command.get("text") or "").strip()
+        _, scope_filter = _parse_scope_filter(raw)
         team_id, user_id = _command_scope(command)
-        memories = memory_store.list(team_id, user_id)
+        channel_id = command.get("channel_id") or None
+        memories = memory_store.list(
+            team_id,
+            user_id,
+            scope=scope_filter,  # type: ignore[arg-type]
+            channel_id=channel_id,
+        )
         if not memories:
             await respond(text="No memories yet. Use `/remember <fact>` to add one.")
             return
-        lines = [f"{i + 1}. {m.text}" for i, m in enumerate(memories)]
-        await respond(text="Your memories:\n" + "\n".join(lines))
+        lines = [f"{i + 1}. [{m.scope}] {m.text}" for i, m in enumerate(memories)]
+        header = (
+            "Your memories" if scope_filter is None else f"{scope_filter.capitalize()} memories"
+        )
+        await respond(text=f"{header}:\n" + "\n".join(lines))
 
     @app.command("/model")
     async def handle_model(ack, command, respond):
@@ -947,6 +1039,157 @@ def create_slack_app(
             return
         _thread_model_overrides[key] = model
         await respond(text=f"Model override set for this channel: `{model}`")
+
+    @app.command("/cancel")
+    async def handle_cancel(ack, command, respond):
+        await ack()
+        from .cancellation import request_cancellation
+
+        tenant = command.get("enterprise_id") or command.get("team_id")
+        channel = command.get("channel_id") or ""
+        invoker = command.get("user_id") or ""
+        # Scope the lookup to the invoking user so two users sharing a channel
+        # don't cancel each other's runs by accident.
+        run = run_store.find_most_recent(
+            lambda r: (
+                r.team_id == tenant
+                and r.channel_id == channel
+                and r.user_id == invoker
+                and r.status == "running"
+            )
+        )
+        if run is None:
+            await respond(text="You have no in-flight run to cancel in this channel.")
+            return
+        if request_cancellation(run.id):
+            await respond(text=f"Cancelled run `{run.id}`.")
+        else:
+            await respond(
+                text=f"Run `{run.id}` has no active cancellation event (already finishing)."
+            )
+
+    # ── 4.5 App Home tab ──────────────────────────────────────────────────────
+
+    @app.event("app_home_opened")
+    async def handle_app_home_opened(event, client, context):
+        from .app_home import publish_home_view
+
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        await publish_home_view(client, user_id=event.get("user", ""), team_id=tenant)
+
+    @app.action("sandstorm_forget_memory")
+    async def handle_forget_memory_action(ack, body, client, context):
+        await ack()
+        from .app_home import publish_home_view
+
+        memory_id = body.get("actions", [{}])[0].get("value") or ""
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = (body.get("user") or {}).get("id") or ""
+        # Ownership check: only forget the clicking user's own memory. Without
+        # this, any user who can open App Home could delete another user's
+        # memory by crafting an action payload with that memory id.
+        if memory_id:
+            memory_store.forget_by_id(memory_id, team_id=tenant, user_id=user_id, scope="user")
+        await publish_home_view(client, user_id=user_id, team_id=tenant)
+
+    @app.action("sandstorm_cancel_run")
+    async def handle_cancel_run_action(ack, body, client, context):
+        await ack()
+        from .app_home import publish_home_view
+        from .cancellation import request_cancellation
+
+        run_id = body.get("actions", [{}])[0].get("value") or ""
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = (body.get("user") or {}).get("id") or ""
+        # Ownership check: only cancel runs that belong to the clicking user
+        # in their own tenant.
+        if run_id:
+            run = run_store.get(run_id)
+            if (
+                run is not None
+                and run.team_id == tenant
+                and run.user_id == user_id
+                and run.status == "running"
+            ):
+                request_cancellation(run_id)
+        await publish_home_view(client, user_id=user_id, team_id=tenant)
+
+    # ── 5. Reaction-triggered runs ─────────────────────────────────────────────
+    # Users add an emoji to a message to fire an agent. Matched against
+    # reaction-type triggers in sandstorm.json. Runs land in the same thread
+    # as the reacted-to message so they share the paused sandbox.
+
+    @app.event("reaction_added")
+    async def handle_reaction(event, client, context):
+        emoji = event.get("reaction")
+        item = event.get("item") or {}
+        if item.get("type") != "message":
+            return
+        channel = item.get("channel")
+        ts = item.get("ts")
+        if not channel or not ts:
+            return
+
+        from .config import load_sandstorm_config
+        from .triggers import load_triggers, render_prompt
+
+        config = load_sandstorm_config()
+        if config is None:
+            return
+        try:
+            triggers = load_triggers(config)
+        except ValueError:
+            logger.exception("Failed to load triggers for reaction event")
+            return
+
+        matches = [
+            t
+            for t in triggers
+            if t.type == "reaction"
+            and t.emoji == emoji
+            and (not t.channels or channel in t.channels)
+        ]
+        if not matches:
+            return
+
+        try:
+            history = await client.conversations_history(
+                channel=channel, oldest=ts, inclusive=True, limit=1
+            )
+        except Exception:
+            logger.exception("Failed to fetch reacted-to message %s/%s", channel, ts)
+            return
+        messages = history.get("messages", []) if history else []
+        if not messages:
+            return
+        message = messages[0]
+
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = event.get("user", "unknown")
+
+        for trigger in matches:
+            rendered = render_prompt(
+                trigger.prompt,
+                message={"text": message.get("text", ""), "user": message.get("user", "")},
+                channel={"id": channel},
+                reaction=emoji,
+            )
+            run_id = uuid.uuid4().hex[:8]
+            request = _build_query_request(rendered, None, team_id=tenant, user_id=user_id)
+            thread_ts = message.get("thread_ts") or ts
+            try:
+                await _run_in_sandbox_pool(
+                    request=request,
+                    run_id=run_id,
+                    client=client,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    context=context,
+                    user_id=user_id,
+                    binary_files={},
+                )
+            except Exception:
+                logger.exception("Reaction trigger %s failed for run %s", trigger.name, run_id)
 
     return app
 

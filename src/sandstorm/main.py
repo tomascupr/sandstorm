@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -15,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
+from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, cancellation, telemetry
 from .auth import load_api_keys, verify_api_token
 from .config import load_project_dotenv as load_dotenv
 from .config import load_sandstorm_config
@@ -92,6 +93,126 @@ def _auto_register_webhook() -> str | None:
         return None
 
 
+_TRIGGER_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn_trigger_task(coro) -> asyncio.Task:
+    """Fire-and-forget a trigger coroutine, keeping a strong reference.
+
+    asyncio only holds weak references to tasks, so without a pinning set a
+    long agent run could be garbage-collected mid-flight. The done-callback
+    removes the task on completion so the set doesn't grow unbounded.
+    """
+    task = asyncio.create_task(coro)
+    _TRIGGER_TASKS.add(task)
+    task.add_done_callback(_TRIGGER_TASKS.discard)
+    return task
+
+
+async def _setup_triggers(app: FastAPI):
+    """Load triggers from sandstorm.json, mount webhook routes, start cron."""
+    from .triggers import (
+        TriggerDefinition,
+        load_triggers,
+        render_prompt,
+        start_cron_scheduler,
+        verify_webhook_secret,
+    )
+
+    config = load_sandstorm_config()
+    if config is None:
+        return None
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        logger.error("Invalid triggers in sandstorm.json: %s", exc)
+        return None
+    if not triggers:
+        return None
+
+    async def _fire_trigger(trigger: TriggerDefinition, *, rendered: str | None = None) -> None:
+        prompt = rendered if rendered is not None else trigger.prompt
+        req_id = f"trigger-{trigger.name}-{uuid.uuid4().hex[:6]}"
+        try:
+            request = QueryRequest(
+                prompt=prompt,
+                model=None,
+                max_turns=None,
+                timeout=None,
+                files=None,
+                output_format={},
+                team_id="__trigger__",
+                user_id=trigger.name,
+                anthropic_api_key=None,
+                e2b_api_key=None,
+                openrouter_api_key=None,
+            )
+        except ValueError as exc:
+            logger.error("[%s] trigger %s: %s", req_id, trigger.name, exc)
+            return
+        run_store.create(
+            id=req_id,
+            prompt=prompt,
+            model=None,
+            team_id="__trigger__",
+            user_id=trigger.name,
+            raw_prompt=prompt,
+        )
+        cancellation.register_run(req_id)
+        try:
+            async for _line in run_agent_in_sandbox(request, req_id):
+                pass
+        except Exception:
+            logger.exception("[%s] trigger %s failed", req_id, trigger.name)
+            run_store.fail(req_id, "trigger execution failed")
+        finally:
+            cancellation.unregister_run(req_id)
+
+    for trigger in triggers:
+        if trigger.type != "webhook":
+            continue
+
+        def _make_handler(t: TriggerDefinition):
+            async def _handler(request: Request) -> JSONResponse:
+                header = request.headers.get("x-sandstorm-trigger-secret")
+                if not verify_webhook_secret(t.secret, header):
+                    return JSONResponse({"error": "invalid trigger secret"}, status_code=401)
+                try:
+                    body = await request.json()
+                except Exception:
+                    # Malformed / non-JSON payloads don't silently become {}:
+                    # the prompt template likely expects {{body.*}} and we'd
+                    # fire the agent with mostly-empty context, which is
+                    # surprising. Return 400 so the caller fixes the request.
+                    return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+                rendered = render_prompt(
+                    t.prompt,
+                    body=body if isinstance(body, dict) else {"raw": body},
+                    headers=dict(request.headers),
+                )
+                _spawn_trigger_task(_fire_trigger(t, rendered=rendered))
+                return JSONResponse({"status": "accepted", "trigger": t.name}, status_code=202)
+
+            return _handler
+
+        app.add_api_route(
+            trigger.path or "",
+            _make_handler(trigger),
+            methods=["POST"],
+            name=f"trigger_{trigger.name}",
+            summary=f"Sandstorm trigger: {trigger.name}",
+        )
+        logger.info("Mounted webhook trigger %s at %s", trigger.name, trigger.path)
+
+    async def _fire_cron(t: TriggerDefinition) -> None:
+        # Fire-and-forget so the cron scheduler's own loop doesn't block on
+        # the agent run — two co-scheduled triggers must fire together, not
+        # serialise behind a 5-minute agent on a 2-minute cron.
+        _spawn_trigger_task(_fire_trigger(t, rendered=None))
+
+    return await start_cron_scheduler(triggers, _fire_cron)
+
+
 def _auto_deregister_webhook(webhook_id: str | None) -> None:
     """Deregister the auto-registered E2B webhook (best-effort cleanup)."""
     if webhook_id is None:
@@ -117,7 +238,10 @@ async def lifespan(app: FastAPI):
             "SANDSTORM_WEBHOOK_SECRET not set — webhook signature verification disabled"
         )
     webhook_id = _auto_register_webhook()
+    scheduler_task = await _setup_triggers(app)
     yield
+    if scheduler_task is not None:
+        scheduler_task.cancel()
     _auto_deregister_webhook(webhook_id)
 
 
@@ -287,6 +411,7 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                 }
             ),
         )
+        cancellation.register_run(req_id)
         cost_usd = None
         num_turns = None
         model = request.model
@@ -343,5 +468,30 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                 )
             finally:
                 record_request_duration(time.monotonic() - start, model=request.model)
+                cancellation.unregister_run(req_id)
 
     return EventSourceResponse(event_generator(), ping=30)
+
+
+@app.post(
+    "/runs/{run_id}/cancel",
+    summary="Cancel an in-flight run",
+    description=(
+        "Signal cancellation to a running agent. Returns 404 when the run_id"
+        " is unknown, 409 when the run has already completed."
+    ),
+)
+async def cancel_run(run_id: str, token: str = Depends(verify_api_token)):
+    run = run_store.get(run_id)
+    if run is None:
+        return JSONResponse({"error": "unknown run_id"}, status_code=404)
+    if run.status != "running":
+        return JSONResponse(
+            {"error": f"run status is {run.status}, cannot cancel"}, status_code=409
+        )
+    if cancellation.request_cancellation(run_id):
+        return {"status": "cancelling", "run_id": run_id}
+    # Run has a "running" status in the store but no active event: fail the
+    # record so the operator isn't stuck with a zombie.
+    run_store.fail(run_id, "cancelled (stale registration)")
+    return JSONResponse({"error": "run had no active cancellation event"}, status_code=409)

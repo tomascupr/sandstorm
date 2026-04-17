@@ -2,6 +2,28 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.9.1] - 2026-04-17
+
+### Bug Fixes
+
+- address review findings (C1-C3, H1-H3, M2)
+
+### Documentation
+
+- triggers, MA interop, custom MCPs, memory scopes, Slack updates
+
+### Features
+
+- publish @duvo/sandstorm-client to npm on release
+- upgrade streaming to bolt-python 1.28 (loading_messages)
+- App Home config UI (read-first, two write actions)
+- three-level scope (team / channel / user)
+- cancel in-flight runs from Slack, CLI, HTTP
+- per-channel default agent overlays
+- reaction-triggered runs as a third trigger type
+- cron (sub-hourly) + generic webhook primitives
+- ds add --custom for arbitrary MCP servers
+
 ## [0.9.0] - 2026-04-17
 
 ### Bug Fixes

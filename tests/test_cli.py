@@ -700,6 +700,161 @@ class TestCli:
         env_lines = (tmp_path / ".env").read_text(encoding="utf-8").splitlines()
         assert any(env_var in line for line in env_lines)
 
+    def test_add_custom_wires_npm_mcp(self, tmp_path, monkeypatch):
+        """`ds add --custom zapier --package mcp-remote --arg URL --env TOKEN`
+        produces a valid mcp_servers entry and updates env files."""
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ZAPIER_MCP_TOKEN", "zap-key")
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "zapier",
+                "--package",
+                "mcp-remote",
+                "--arg",
+                "https://mcp.zapier.app/mcp",
+                "--env",
+                "ZAPIER_MCP_TOKEN",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
+        assert config["mcp_servers"]["zapier"] == {
+            "command": "npx",
+            "args": ["-y", "mcp-remote", "https://mcp.zapier.app/mcp"],
+            "env": {"ZAPIER_MCP_TOKEN": "${ZAPIER_MCP_TOKEN}"},
+        }
+        env_example_lines = (tmp_path / ".env.example").read_text(encoding="utf-8").splitlines()
+        assert any("ZAPIER_MCP_TOKEN" in line for line in env_example_lines)
+
+    def test_add_custom_uvx_runtime(self, tmp_path, monkeypatch):
+        """--runtime uvx uses uvx instead of npx and skips the `-y` flag."""
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("DATABASE_URI", "postgres://x:y@host/db")
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "postgres",
+                "--runtime",
+                "uvx",
+                "--package",
+                "postgres-mcp",
+                "--env",
+                "DATABASE_URI",
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        config = json.loads((tmp_path / "sandstorm.json").read_text(encoding="utf-8"))
+        assert config["mcp_servers"]["postgres"] == {
+            "command": "uvx",
+            "args": ["postgres-mcp"],
+            "env": {"DATABASE_URI": "${DATABASE_URI}"},
+        }
+
+    def test_add_custom_is_idempotent(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("FOO_TOKEN", "x")
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+        args = [
+            "add",
+            "--custom",
+            "foo",
+            "--package",
+            "@foo/mcp",
+            "--env",
+            "FOO_TOKEN",
+        ]
+        runner = CliRunner()
+        assert runner.invoke(cli, args).exit_code == 0
+        second = runner.invoke(cli, args)
+        assert second.exit_code == 0, second.output
+        assert "already installed" in second.output
+
+    def test_add_custom_rejects_conflict_without_force(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("FOO_TOKEN", "x")
+        (tmp_path / "sandstorm.json").write_text(
+            json.dumps(
+                {
+                    "model": "sonnet",
+                    "mcp_servers": {"foo": {"command": "npx", "args": ["-y", "other"], "env": {}}},
+                }
+            ),
+            encoding="utf-8",
+        )
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "foo",
+                "--package",
+                "@foo/mcp",
+                "--env",
+                "FOO_TOKEN",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--force" in result.output
+
+    def test_add_custom_rejects_invalid_slug(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "BadSlug!",
+                "--package",
+                "@foo/mcp",
+            ],
+        )
+        assert result.exit_code != 0
+
+    def test_add_custom_rejects_invalid_env_name(self, tmp_path, monkeypatch):
+        """--env MY_VAR ok; --env 'MY KEY' or 123BADNAME must error at CLI
+        time rather than silently land in sandstorm.json."""
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "thing",
+                "--package",
+                "@foo/mcp",
+                "--env",
+                "MY KEY",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "MY KEY" in result.output
+
     def test_webhook_register_rejects_non_http_url(self, monkeypatch):
         monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
         _disable_dotenv(monkeypatch)

@@ -122,6 +122,13 @@ class QueryRequest(BaseModel):
         default=None,
         description="Scope for memory lookup/write. Defaults to '__local__'.",
     )
+    channel_id: str | None = Field(
+        default=None,
+        description=(
+            "Optional Slack channel ID for channel-scoped memory visibility."
+            " Runs in a channel see team + channel + user memories concatenated."
+        ),
+    )
     remember: str | None = Field(
         default=None,
         description=(

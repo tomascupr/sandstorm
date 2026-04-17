@@ -16,7 +16,7 @@ pip install "duvo-sandstorm[slack]"
 
 ### 2. Create the Slack app
 
-Run the interactive setup wizard — it opens Slack's app creation page with a pre-filled manifest, collects your tokens, and saves them to `.env`:
+Run the interactive setup wizard, it opens Slack's app creation page with a pre-filled manifest, collects your tokens, and saves them to `.env`:
 
 ```bash
 ds slack setup
@@ -38,7 +38,7 @@ The wizard will:
 ds slack start
 ```
 
-This starts in Socket Mode (no public URL needed — great for development). The bot connects to Slack via WebSocket and starts listening for @mentions and DMs.
+This starts in Socket Mode (no public URL needed, great for development). The bot connects to Slack via WebSocket and starts listening for @mentions and DMs.
 
 ## Usage
 
@@ -83,13 +83,57 @@ Sandstorm: [sees prior context, updates the output]
 
 ## Features
 
-- **Streaming responses** — agent output appears in real-time as it works, not all at once
-- **File uploads** — share text files (code, CSV, JSON, logs) and binary files (images, PDFs, audio, video, zip) in the thread; the agent gets them in its sandbox. 10 MB limit per file
-- **Sandbox reuse per thread** — follow-up @mentions in the same thread reuse the sandbox, so the agent has access to files and state from previous turns
-- **Thread context** — full conversation history (including bot responses and file attachment metadata) is passed to the agent for multi-turn conversations
-- **File extraction** — files created by the agent in the sandbox are automatically extracted and uploaded to the Slack thread (up to 10 files, 25 MB per file, 50 MB total)
-- **Feedback buttons** — each response gets thumbs up/down buttons; feedback is recorded in the run store
-- **Metadata footer** — every response shows model, turns, cost, and duration
+- **Streaming responses**, agent output appears in real-time as it works, not all at once
+- **File uploads**, share text files (code, CSV, JSON, logs) and binary files (images, PDFs, audio, video, zip) in the thread; the agent gets them in its sandbox. 10 MB limit per file
+- **Sandbox reuse per thread**, follow-up @mentions in the same thread reuse the sandbox, so the agent has access to files and state from previous turns
+- **Thread context**, full conversation history (including bot responses and file attachment metadata) is passed to the agent for multi-turn conversations
+- **File extraction**, files created by the agent in the sandbox are automatically extracted and uploaded to the Slack thread (up to 10 files, 25 MB per file, 50 MB total)
+- **Feedback buttons**, each response gets thumbs up/down buttons; feedback is recorded in the run store
+- **Metadata footer**, every response shows model, turns, cost, and duration
+- **Per-channel default agent** (v0.9.1): set a starter + model per channel in `sandstorm.json` so `#support` auto-uses `support-triage` and `#eng` auto-uses `code-review`
+- **App Home config tab** (v0.9.1): open the Sandstorm bot's Home tab to see your memories, cancel an in-flight run, and read channel defaults + active triggers
+- **Reaction-triggered runs** (v0.9.1): an emoji reaction fires an agent with the reacted message as context. See [`triggers.md`](triggers.md)
+- **Cancel in-flight runs** (v0.9.1): `/cancel` slash command stops the most recent running agent in the current channel; also available from App Home and `ds cancel <run_id>`
+- **Three-level memory** (v0.9.1): `/remember` (personal), `/team-remember` (workspace-wide), `/channel-remember` (channel-only). See [`memory.md`](memory.md)
+
+### Per-channel defaults
+
+Add a `channels` block to `sandstorm.json` to set default starter + model
+per channel:
+
+```json
+"channels": {
+  "C_SUPPORT_ID": {"starter": "support-triage", "model": "sonnet"},
+  "C_ENG_ID":     {"starter": "code-review",    "model": "opus"}
+}
+```
+
+Explicit request overrides (like the `/model` slash command) still win.
+The channel overlay is a default, not a cage.
+
+### App Home
+
+The bot's Home tab shows your current setup. Open any Slack DM thread with
+the Sandstorm bot, click the bot name at the top, and switch to the
+"Home" tab. You get:
+
+- Most-recent run status with cost + duration
+- An in-flight `[Cancel]` button when your run is live
+- Per-channel defaults for channels you're in
+- Your personal memories each with a `[Forget]` button
+- Team memories (read-only)
+- Active triggers for your workspace (read-only)
+
+Heavier config edits (triggers, channels, models) stay in `sandstorm.json`
+for v0.9.1.
+
+### Upgrade note: Slack manifest reinstall
+
+v0.9.1 adds new slash commands (`/team-remember`, `/channel-remember`,
+`/cancel`), a `reactions:read` scope, a `users:read` scope, and an
+`app_home_opened` event. Users upgrading from v0.9.0 need one app
+reinstall to pick up all v0.9.1 scope additions. Re-run `ds slack setup`
+or reinstall from the Slack app dashboard manually.
 
 ## Configuration
 
@@ -104,11 +148,11 @@ Sandstorm: [sees prior context, updates the output]
 | `E2B_API_KEY` | Yes | -- | E2B sandbox API key |
 | `OPENROUTER_API_KEY` | No | -- | OpenRouter key (if using OpenRouter) |
 
-*Or equivalent provider key — see [configuration](configuration.md#providers) for provider setup.
+*Or equivalent provider key, see [configuration](configuration.md#providers) for provider setup.
 
 ### sandstorm.json
 
-All `sandstorm.json` configuration applies to the Slack bot — system prompts, skills, subagents, MCP servers, allowed tools, and structured output all work the same way. The bot loads `sandstorm.json` from the working directory where `ds slack start` is run.
+All `sandstorm.json` configuration applies to the Slack bot, system prompts, skills, subagents, MCP servers, allowed tools, and structured output all work the same way. The bot loads `sandstorm.json` from the working directory where `ds slack start` is run.
 
 > **Scaling note:** Sandbox reuse is process-local today. In a multi-worker or multi-instance deployment, thread replies may land on a different process and start a fresh sandbox unless you add sticky routing or your own shared session layer.
 

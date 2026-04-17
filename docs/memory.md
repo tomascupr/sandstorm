@@ -9,13 +9,25 @@ Design principle: the agent does not decide when to use memory. The host
 always injects it. This sidesteps the "agent forgot to call the memory tool"
 class of bug that plagues tool-based memory systems.
 
+## Three scopes (v0.9.1+)
+
+Memories live in one of three scopes. The agent sees all three concatenated
+in the system prompt, most-general first:
+
+- **team**: shared across everyone in the Slack tenant
+  (the workspace, or enterprise for Grid installs)
+- **channel**: shared across users in a specific Slack channel
+- **user**: personal to one user in one tenant (v0.9.0 default)
+
 ## Slash commands (Slack)
 
-| Command                  | Effect                                                            |
-| ------------------------ | ----------------------------------------------------------------- |
-| `/remember <fact>`       | Persist a fact for you in the current workspace.                  |
-| `/forget <substring>`    | Delete any memory whose text contains the substring (case-insensitive). |
-| `/memories`              | List the facts Sandstorm remembers for you. Ephemeral reply.      |
+| Command                              | Effect                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| `/remember <fact>`                   | Persist a personal fact for you (user scope).                          |
+| `/team-remember <fact>`              | Shared across everyone in this workspace (team scope).                 |
+| `/channel-remember <fact>`           | Shared within this channel only (channel scope).                       |
+| `/forget <substring> [scope]`        | Delete memories containing the substring. Optional scope filter.       |
+| `/memories [scope]`                  | List what Sandstorm remembers. Default: combined view (team + channel + user). |
 
 Examples:
 

@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import sys
 import urllib.error
@@ -418,6 +419,51 @@ def _resolve_toolpack_env_vars(toolpack: ToolpackDefinition) -> dict[str, str]:
     return values
 
 
+_CUSTOM_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_CUSTOM_ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
+
+
+def _build_custom_toolpack(
+    *,
+    slug: str,
+    package: str,
+    runtime: str,
+    envs: tuple[str, ...],
+    args: tuple[str, ...],
+) -> ToolpackDefinition:
+    """Build an ad-hoc ToolpackDefinition from `ds add --custom` flags."""
+    if not _CUSTOM_SLUG_PATTERN.match(slug):
+        raise click.BadParameter(
+            f"--custom slug {slug!r} must match {_CUSTOM_SLUG_PATTERN.pattern} "
+            "(lower-case, digits, underscore, dash).",
+            param_hint="--custom",
+        )
+    for env_name in envs:
+        if not _CUSTOM_ENV_NAME_PATTERN.match(env_name):
+            raise click.BadParameter(
+                f"--env {env_name!r} must match {_CUSTOM_ENV_NAME_PATTERN.pattern} "
+                "(upper-case, digits, underscore, first char not a digit). "
+                "This catches typos like 'MY KEY' or '123BADNAME' at CLI time.",
+                param_hint="--env",
+            )
+    # npx always wants a -y to skip the prompt; uvx runs the package directly.
+    runtime_cmd = runtime.lower()
+    command_args = ["-y", package, *args] if runtime_cmd == "npx" else [package, *args]
+    env_map = {name: f"${{{name}}}" for name in envs}
+    return ToolpackDefinition(
+        slug=slug,
+        title=slug,
+        description=f"Custom MCP server: {runtime_cmd} {package}",
+        required_env_vars=tuple(envs),
+        mcp_server_name=slug,
+        mcp_server_config={
+            "command": runtime_cmd,
+            "args": command_args,
+            "env": env_map,
+        },
+    )
+
+
 def _install_toolpack_config(
     config: dict,
     toolpack: ToolpackDefinition,
@@ -624,23 +670,79 @@ def init(starter_name: str | None, directory: Path | None, show_list: bool, forc
     is_flag=True,
     help="Overwrite the toolpack's existing MCP server config when it differs.",
 )
-def add(toolpack_name: str | None, show_list: bool, force: bool) -> None:
-    """Install a bundled toolpack into the current Sandstorm project."""
+@click.option(
+    "--custom",
+    "custom_slug",
+    default=None,
+    help=(
+        "Wire an arbitrary MCP server under this slug (e.g. --custom zapier). "
+        "Use with --package plus --env / --arg / --runtime."
+    ),
+)
+@click.option(
+    "--package",
+    "custom_package",
+    default=None,
+    help="Package name for --custom (npm package for npx, or PyPI name for uvx).",
+)
+@click.option(
+    "--runtime",
+    "custom_runtime",
+    type=click.Choice(["npx", "uvx"], case_sensitive=False),
+    default="npx",
+    show_default=True,
+    help="Runtime command for --custom (npx or uvx).",
+)
+@click.option(
+    "--env",
+    "custom_envs",
+    multiple=True,
+    help="Env var the custom server needs (repeatable). Added to .env.example.",
+)
+@click.option(
+    "--arg",
+    "custom_args",
+    multiple=True,
+    help="Extra positional arg passed after the package (repeatable).",
+)
+def add(
+    toolpack_name: str | None,
+    show_list: bool,
+    force: bool,
+    custom_slug: str | None,
+    custom_package: str | None,
+    custom_runtime: str,
+    custom_envs: tuple[str, ...],
+    custom_args: tuple[str, ...],
+) -> None:
+    """Install a bundled toolpack, or wire an arbitrary MCP with --custom."""
     load_dotenv()
 
     if show_list:
-        if toolpack_name:
+        if toolpack_name or custom_slug:
             raise click.UsageError("--list cannot be combined with a toolpack name.")
         _print_toolpack_list()
         return
 
-    if not toolpack_name:
-        raise click.UsageError("Provide a toolpack name or use --list.")
-
-    try:
-        toolpack = resolve_toolpack(toolpack_name)
-    except ValueError as exc:
-        raise click.BadParameter(str(exc), param_hint="toolpack") from exc
+    if custom_slug:
+        if toolpack_name:
+            raise click.UsageError("Provide either a bundled toolpack name OR --custom, not both.")
+        if not custom_package:
+            raise click.UsageError("--custom requires --package.")
+        toolpack = _build_custom_toolpack(
+            slug=custom_slug,
+            package=custom_package,
+            runtime=custom_runtime,
+            envs=custom_envs,
+            args=custom_args,
+        )
+    elif toolpack_name:
+        try:
+            toolpack = resolve_toolpack(toolpack_name)
+        except ValueError as exc:
+            raise click.BadParameter(str(exc), param_hint="toolpack") from exc
+    else:
+        raise click.UsageError("Provide a toolpack name, --custom, or --list.")
 
     config_path, config = _load_project_config_for_editing()
     has_allowed_tools = "allowed_tools" in config
@@ -1032,6 +1134,43 @@ def replay(
         click.echo("\n" + report, err=True)
 
 
+@cli.command()
+@click.argument("run_id")
+@click.option(
+    "--server",
+    default="http://localhost:8000",
+    show_default=True,
+    help="Sandstorm server URL.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="Sandstorm API token [env: SANDSTORM_API_KEY].",
+)
+def cancel(run_id: str, server: str, api_key: str | None) -> None:
+    """Cancel an in-flight run by id.
+
+    Posts to `<server>/runs/<run_id>/cancel`. Returns non-zero when the run
+    id is unknown (404) or already finished (409).
+    """
+    load_dotenv()
+    token = api_key or os.environ.get("SANDSTORM_API_KEY", "")
+    url = server.rstrip("/") + f"/runs/{run_id}/cancel"
+    req = urllib.request.Request(url, method="POST", data=b"")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            click.echo(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace") if exc.fp else ""
+        click.echo(f"Error: HTTP {exc.code}: {detail}", err=True)
+        raise SystemExit(1) from exc
+    except urllib.error.URLError as exc:
+        click.echo(f"Error: {exc.reason}", err=True)
+        raise SystemExit(1) from exc
+
+
 def _format_replay_report(
     *,
     original,
@@ -1105,6 +1244,110 @@ def _require_http_url(url: str) -> None:
     if not url.startswith(("http://", "https://")):
         click.echo("Error: URL must use http:// or https://", err=True)
         raise SystemExit(1)
+
+
+@cli.group()
+def trigger() -> None:
+    """List and test Sandstorm triggers defined in sandstorm.json."""
+
+
+@trigger.command("list")
+def trigger_list() -> None:
+    """List active triggers with their next fire time."""
+    load_dotenv()
+    from .config import load_sandstorm_config
+    from .triggers import load_triggers
+
+    config = load_sandstorm_config()
+    if config is None:
+        click.echo("No sandstorm.json in the current directory.")
+        raise SystemExit(1)
+
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        click.echo(f"Invalid triggers: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    if not triggers:
+        click.echo("No triggers defined.")
+        return
+
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from croniter import croniter
+
+    click.echo(f"{'Name':<24} {'Type':<8} {'Details':<40} Next fire")
+    click.echo("-" * 90)
+    for t in triggers:
+        if t.type == "cron":
+            now = _dt.now(_UTC)
+            nxt = croniter(t.schedule or "", now).get_next(_dt)
+            next_str = nxt.strftime("%Y-%m-%d %H:%M:%S UTC")
+            click.echo(f"{t.name:<24} {t.type:<8} {t.schedule or '':<40} {next_str}")
+        elif t.type == "webhook":
+            secret_str = "secret-required" if t.secret else "OPEN (no secret)"
+            details = f"{t.path or ''} ({secret_str})"
+            click.echo(f"{t.name:<24} {t.type:<8} {details:<40} on-demand")
+        else:  # reaction
+            ch = ",".join(t.channels) or "<any channel>"
+            details = f":{t.emoji or ''}: in {ch}"
+            click.echo(f"{t.name:<24} {t.type:<8} {details:<40} on-reaction")
+
+
+@trigger.command("test")
+@click.argument("name")
+def trigger_test(name: str) -> None:
+    """Fire a trigger by name (skips cron / webhook auth — runs the prompt directly)."""
+    load_dotenv()
+    from .config import load_sandstorm_config
+    from .triggers import load_triggers
+
+    config = load_sandstorm_config()
+    if config is None:
+        click.echo("No sandstorm.json in the current directory.", err=True)
+        raise SystemExit(1)
+
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        click.echo(f"Invalid triggers: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    match = next((t for t in triggers if t.name == name), None)
+    if match is None:
+        choices = ", ".join(t.name for t in triggers) or "(none)"
+        click.echo(
+            f"Unknown trigger {name!r}. Defined triggers: {choices}",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    from .models import QueryRequest
+    from .sandbox import run_agent_in_sandbox
+
+    request = QueryRequest(
+        prompt=match.prompt,
+        model=None,
+        max_turns=None,
+        timeout=None,
+        files=None,
+        anthropic_api_key=None,
+        e2b_api_key=None,
+        openrouter_api_key=None,
+        team_id="__trigger__",
+        user_id=match.name,
+    )
+
+    async def _run() -> None:
+        async for line in run_agent_in_sandbox(request, f"trigger-{match.name}"):
+            _print_event(line)
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt as exc:
+        raise SystemExit(130) from exc
 
 
 @cli.group()
