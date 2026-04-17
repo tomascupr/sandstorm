@@ -116,6 +116,39 @@ class MemoryStore:
         self._append_to_file(memory)
         return memory
 
+    def forget_by_id(
+        self,
+        memory_id: str,
+        *,
+        team_id: str | None,
+        user_id: str | None,
+        scope: MemoryScope = "user",
+        channel_id: str | None = None,
+    ) -> bool:
+        """Tombstone a specific memory by id, but only if it belongs to the
+        requesting (team, user, scope). Returns True when a record was
+        tombstoned; False when no matching record exists.
+
+        This is the safe target for UI callers (like the App Home Forget
+        button) where the memory id came from a payload the attacker can
+        influence.
+        """
+        team, user = self._normalize_team_user(team_id, user_id)
+        memory = self._index.get(memory_id)
+        if memory is None or memory.deleted:
+            return False
+        if memory.team_id != team:
+            return False
+        if memory.scope != scope:
+            return False
+        if scope == "user" and memory.user_id != user:
+            return False
+        if scope == "channel" and memory.channel_id != channel_id:
+            return False
+        memory.deleted = True
+        self._append_to_file(memory)
+        return True
+
     def forget(
         self,
         team_id: str | None,

@@ -192,6 +192,26 @@ class TestThreeLevelScope:
         team_still = [m.text for m in store.list("T1", "UA", scope="team")]
         assert team_still == ["shared holiday"]
 
+    def test_forget_by_id_requires_ownership(self, tmp_path):
+        """UI callers that receive a memory_id from a payload must only be
+        able to tombstone their own memories. Used by the App Home Forget
+        button to prevent cross-user deletion."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        alice = store.remember("T1", "UA", "alice fact", scope="user")
+        bob = store.remember("T1", "UB", "bob fact", scope="user")
+
+        # Alice can delete her own
+        assert store.forget_by_id(alice.id, team_id="T1", user_id="UA") is True
+        assert alice.deleted is True
+
+        # Alice cannot delete Bob's by guessing his id
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UA") is False
+        assert bob.deleted is False
+
+        # Different tenant cannot delete either
+        assert store.forget_by_id(bob.id, team_id="T2", user_id="UB") is False
+        assert bob.deleted is False
+
     def test_back_compat_loads_pre_v091_rows(self, tmp_path):
         """Old JSONL rows without scope/channel_id default to user scope."""
         path = tmp_path / "m.jsonl"

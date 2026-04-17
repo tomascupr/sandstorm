@@ -1047,14 +1047,19 @@ def create_slack_app(
 
         tenant = command.get("enterprise_id") or command.get("team_id")
         channel = command.get("channel_id") or ""
-        # Slash commands don't carry thread_ts, so we look up the most recent
-        # in-flight run in this channel regardless of thread. This matches
-        # the UX expectation: "cancel whatever I just started in this channel."
+        invoker = command.get("user_id") or ""
+        # Scope the lookup to the invoking user so two users sharing a channel
+        # don't cancel each other's runs by accident.
         run = run_store.find_most_recent(
-            lambda r: r.team_id == tenant and r.channel_id == channel and r.status == "running"
+            lambda r: (
+                r.team_id == tenant
+                and r.channel_id == channel
+                and r.user_id == invoker
+                and r.status == "running"
+            )
         )
         if run is None:
-            await respond(text="No in-flight run to cancel in this channel.")
+            await respond(text="You have no in-flight run to cancel in this channel.")
             return
         if request_cancellation(run.id):
             await respond(text=f"Cancelled run `{run.id}`.")
@@ -1080,15 +1085,11 @@ def create_slack_app(
         memory_id = body.get("actions", [{}])[0].get("value") or ""
         tenant = context.get("enterprise_id") or context.get("team_id")
         user_id = (body.get("user") or {}).get("id") or ""
+        # Ownership check: only forget the clicking user's own memory. Without
+        # this, any user who can open App Home could delete another user's
+        # memory by crafting an action payload with that memory id.
         if memory_id:
-            # `forget` takes a substring match; resolve the memory by id first
-            # so we can tombstone exactly one record.
-            store = memory_store
-            for m in list(store._memories):
-                if m.id == memory_id and not m.deleted:
-                    m.deleted = True
-                    store._append_to_file(m)
-                    break
+            memory_store.forget_by_id(memory_id, team_id=tenant, user_id=user_id, scope="user")
         await publish_home_view(client, user_id=user_id, team_id=tenant)
 
     @app.action("sandstorm_cancel_run")
@@ -1100,8 +1101,17 @@ def create_slack_app(
         run_id = body.get("actions", [{}])[0].get("value") or ""
         tenant = context.get("enterprise_id") or context.get("team_id")
         user_id = (body.get("user") or {}).get("id") or ""
+        # Ownership check: only cancel runs that belong to the clicking user
+        # in their own tenant.
         if run_id:
-            request_cancellation(run_id)
+            run = run_store.get(run_id)
+            if (
+                run is not None
+                and run.team_id == tenant
+                and run.user_id == user_id
+                and run.status == "running"
+            ):
+                request_cancellation(run_id)
         await publish_home_view(client, user_id=user_id, team_id=tenant)
 
     # ── 5. Reaction-triggered runs ─────────────────────────────────────────────

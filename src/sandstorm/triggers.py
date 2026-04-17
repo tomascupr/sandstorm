@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 TriggerType = Literal["cron", "webhook", "reaction"]
 
 _SLUG_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
-_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9_\-./]{1,120}$")
+# Paths must be `/segment[/segment...]`, no `..`, no collision with core
+# Sandstorm routes. Explicit segments-only grammar.
+_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9_\-]+(?:/[A-Za-z0-9_\-]+)*$")
+_RESERVED_PATH_PREFIXES = ("/query", "/runs", "/health", "/slack", "/webhooks")
 # Dotted placeholder with safe lookup path. Whitespace inside braces is OK.
 _TEMPLATE_PATTERN = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_-]+)*)\s*\}\}")
 
@@ -94,6 +97,12 @@ def load_triggers(sandstorm_config: Mapping[str, object]) -> list[TriggerDefinit
                 raise ValueError(
                     f"trigger {name!r} path must start with / and match {_PATH_PATTERN.pattern}"
                 )
+            for reserved in _RESERVED_PATH_PREFIXES:
+                if path == reserved or path.startswith(reserved + "/"):
+                    raise ValueError(
+                        f"trigger {name!r} path {path!r} collides with a reserved route "
+                        f"({reserved}). Namespace webhook paths under /triggers/<name>."
+                    )
             if path in seen_paths:
                 raise ValueError(f"duplicate webhook path: {path!r}")
             seen_paths.add(path)
@@ -151,6 +160,12 @@ def load_triggers(sandstorm_config: Mapping[str, object]) -> list[TriggerDefinit
     return triggers
 
 
+def _xml_escape(text: str) -> str:
+    """Minimal XML escape to keep a closing tag inside the value from
+    terminating the wrapper early."""
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def render_prompt(
     template: str,
     *,
@@ -159,9 +174,16 @@ def render_prompt(
     message: Mapping[str, object] | None = None,
     channel: Mapping[str, object] | None = None,
     reaction: str | None = None,
+    safe_wrap: bool = True,
 ) -> str:
     """Substitute `{{body.foo.bar}}` / `{{headers.x-foo}}` / `{{message.text}}`
     / `{{channel.id}}` / `{{reaction}}` placeholders.
+
+    When `safe_wrap=True` (default) each interpolated value is XML-wrapped as
+    `<trigger_value path="body.foo">...</trigger_value>` so a trigger caller
+    can't use `body.*` content to inject "ignore previous instructions" into
+    the system prompt. Set `safe_wrap=False` for tests or when the template
+    author owns the source of all substitutions.
 
     No Jinja, no eval. Missing keys render as empty string (intentional: lets a
     single prompt template survive missing optional fields).
@@ -178,6 +200,11 @@ def render_prompt(
     if reaction is not None:
         sources["reaction"] = reaction
 
+    def _wrap(path: str, value: str) -> str:
+        if not safe_wrap or not value:
+            return value
+        return f'<trigger_value path="{path}">{_xml_escape(value)}</trigger_value>'
+
     def replace(match: re.Match[str]) -> str:
         path = match.group(1)
         parts = path.split(".")
@@ -186,7 +213,8 @@ def render_prompt(
             return ""
         # For single-key lookups on scalar roots (e.g. {{reaction}})
         if len(parts) == 1:
-            return str(root) if not isinstance(root, Mapping) else ""
+            value = str(root) if not isinstance(root, Mapping) else ""
+            return _wrap(path, value)
         cursor: object = root
         for segment in parts[1:]:
             if isinstance(cursor, Mapping):
@@ -195,7 +223,7 @@ def render_prompt(
                 return ""
             if cursor is None:
                 return ""
-        return str(cursor)
+        return _wrap(path, str(cursor))
 
     return _TEMPLATE_PATTERN.sub(replace, template)
 

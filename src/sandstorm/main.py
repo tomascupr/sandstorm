@@ -142,12 +142,15 @@ async def _setup_triggers(app: FastAPI):
             user_id=trigger.name,
             raw_prompt=prompt,
         )
+        cancellation.register_run(req_id)
         try:
             async for _line in run_agent_in_sandbox(request, req_id):
                 pass
         except Exception:
             logger.exception("[%s] trigger %s failed", req_id, trigger.name)
             run_store.fail(req_id, "trigger execution failed")
+        finally:
+            cancellation.unregister_run(req_id)
 
     for trigger in triggers:
         if trigger.type != "webhook":
@@ -161,13 +164,16 @@ async def _setup_triggers(app: FastAPI):
                 try:
                     body = await request.json()
                 except Exception:
-                    body = {}
+                    # Malformed / non-JSON payloads don't silently become {}:
+                    # the prompt template likely expects {{body.*}} and we'd
+                    # fire the agent with mostly-empty context, which is
+                    # surprising. Return 400 so the caller fixes the request.
+                    return JSONResponse({"error": "invalid JSON body"}, status_code=400)
                 rendered = render_prompt(
                     t.prompt,
                     body=body if isinstance(body, dict) else {"raw": body},
                     headers=dict(request.headers),
                 )
-                # Fire-and-forget so the HTTP caller gets a fast 202
                 asyncio.create_task(_fire_trigger(t, rendered=rendered))
                 return JSONResponse({"status": "accepted", "trigger": t.name}, status_code=202)
 
