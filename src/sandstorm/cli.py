@@ -781,6 +781,38 @@ def query(
 
 
 @cli.command()
+@click.option(
+    "--deep",
+    is_flag=True,
+    help="Also spin up a throwaway E2B sandbox and run a command (costs E2B credits).",
+)
+def doctor(deep: bool) -> None:
+    """Run first-run preflight checks. Prints a colored pass/fail table with fix hints."""
+    load_dotenv()
+    from .doctor import run_checks
+
+    try:
+        results = asyncio.run(run_checks(deep=deep))
+    except KeyboardInterrupt as exc:
+        raise SystemExit(130) from exc
+
+    all_passed = True
+    click.echo("\nSandstorm preflight:\n")
+    for check in results:
+        icon = click.style("✓", fg="green") if check.passed else click.style("✗", fg="red")
+        name = check.name.ljust(30)
+        detail = check.detail
+        click.echo(f"  {icon}  {name}  {detail}")
+        if not check.passed:
+            all_passed = False
+            if check.hint:
+                click.echo(f"        {click.style('fix:', fg='yellow')} {check.hint}")
+    click.echo()
+    if not all_passed:
+        raise SystemExit(1)
+
+
+@cli.command()
 @click.argument("run_id")
 @click.option("--model", "-m", default=None, help="Override the model used for the replay.")
 @click.option("--budget", type=float, default=None, help="Hard cap on replay cost in USD.")
