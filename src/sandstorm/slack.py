@@ -411,6 +411,22 @@ async def _stream_to_slack(
                         logger.info("[%s] Tool: %s", run_id, tool_name)
                         if set_status:
                             await set_status(f"Using {tool_name}...")
+                        else:
+                            # @mention path has no set_status — inline a compact
+                            # tool breadcrumb in the main stream so the user can
+                            # see what the agent is doing instead of silent
+                            # pauses during long tool chains.
+                            try:
+                                await streamer.append(
+                                    markdown_text=f"\n_:hammer_and_wrench: {tool_name}_\n"
+                                )
+                                has_streamed_text = True
+                            except Exception:
+                                logger.error(
+                                    "[%s] streamer.append (tool crumb) failed",
+                                    run_id,
+                                    exc_info=True,
+                                )
 
             elif event_type == "result":
                 cost = event.get("total_cost_usd")
