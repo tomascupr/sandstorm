@@ -1,0 +1,40 @@
+{
+  "name": "@duvo/sandstorm-client",
+  "version": "0.1.0",
+  "description": "TypeScript client for the Sandstorm agent runtime — stream agent runs, manage memory, replay past runs.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tomascupr/sandstorm.git",
+    "directory": "clients/typescript"
+  },
+  "homepage": "https://github.com/tomascupr/sandstorm#readme",
+  "bugs": "https://github.com/tomascupr/sandstorm/issues",
+  "keywords": ["sandstorm", "agent", "claude", "sse", "ai-agents"],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup src/index.ts --format esm,cjs --dts --clean",
+    "test": "node --test src/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}
