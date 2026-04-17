@@ -219,6 +219,10 @@ async def run_agent_in_sandbox(
 
     if sandbox_id:
         # --- Reconnect path: reuse an existing sandbox ---
+        # AsyncSandbox.connect() auto-resumes a paused sandbox. If the ID has
+        # expired or been killed, NotFoundException bubbles up — slack.py's
+        # pool layer catches the failure via reuse_succeeded=False and
+        # creates a fresh sandbox instead.
         logger.info("[%s] Reconnecting to sandbox %s", request_id, sandbox_id)
         sbx = await AsyncSandbox.connect(sandbox_id, api_key=request.e2b_api_key)
         await sbx.set_timeout(timeout)
@@ -426,11 +430,20 @@ async def run_agent_in_sandbox(
                     task.result()
                 except Exception:
                     logger.warning("[%s] Task exception suppressed", request_id, exc_info=True)
-            logger.info(
-                "[%s] Keeping sandbox %s alive (timeout=%ds)",
-                request_id,
-                sbx.sandbox_id,
-                timeout,
-            )
+            # Pause instead of leaving the sandbox running — filesystem + process
+            # state persist across Slack messages and even across server restarts,
+            # while compute stops billing. AsyncSandbox.connect() auto-resumes on
+            # the next message in the thread.
+            try:
+                await sbx.pause()
+                logger.info("[%s] Paused sandbox %s", request_id, sbx.sandbox_id)
+            except Exception:
+                logger.warning(
+                    "[%s] Failed to pause sandbox %s — leaving it running (timeout=%ds)",
+                    request_id,
+                    sbx.sandbox_id,
+                    timeout,
+                    exc_info=True,
+                )
         else:
             await _cleanup(task, sbx, request_id)
