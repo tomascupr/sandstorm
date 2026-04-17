@@ -40,7 +40,7 @@ TEMPLATE = os.environ.get("SANDSTORM_TEMPLATE", "work-43ca/sandstorm")
 FALLBACK_TEMPLATE = "claude-code"
 
 # Claude Agent SDK version — single source of truth (also imported by build_template.py)
-SDK_VERSION = "0.2.42"
+SDK_VERSION = "0.2.112"
 
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)

@@ -30,6 +30,11 @@ const fieldMap = {
   output_format: "outputFormat",
   agents: "agents",
   allowed_tools: "allowedTools",
+  resume: "resume",
+  resume_session_at: "resumeSessionAt",
+  fork_session: "forkSession",
+  include_partial_messages: "includePartialMessages",
+  max_budget_usd: "maxBudgetUsd",
 };
 for (const [src, dst] of Object.entries(fieldMap)) {
   if (config[src] !== undefined && config[src] !== null) options[dst] = config[src];

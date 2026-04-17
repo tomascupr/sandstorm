@@ -279,7 +279,7 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
             attributes={
                 "sandstorm.request_id": req_id,
                 "sandstorm.model": request.model or "",
-                "sandstorm.timeout": request.timeout,
+                "sandstorm.timeout": request.timeout or 0,
                 "sandstorm.file_count": len(request.files) if request.files else 0,
             },
         ) as span:
