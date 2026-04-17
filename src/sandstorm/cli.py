@@ -847,30 +847,10 @@ def upgrade(yes: bool) -> None:
         raise SystemExit(result.returncode)
 
     click.echo(f"\nUpgraded duvo-sandstorm {current} -> {latest}")
-
-    # Check whether SDK_VERSION bumped — if so, offer to rebuild the E2B template
-    try:
-        # Re-import in case the new package has a different pin
-        import importlib
-
-        import sandstorm.sandbox as sandbox_mod
-
-        importlib.reload(sandbox_mod)
-        new_sdk = sandbox_mod.SDK_VERSION  # type: ignore[attr-defined]
-        click.echo(f"\nBundled Claude Agent SDK: {new_sdk}")
-        if click.confirm(
-            "Rebuild the E2B template so new sandboxes use this SDK version?",
-            default=False,
-        ):
-            click.echo("Running: uv run python build_template.py")
-            rebuild_cmd = (
-                ["uv", "run", "python", "build_template.py"]
-                if has_uv
-                else ["python", "build_template.py"]
-            )
-            subprocess.run(rebuild_cmd, check=False)
-    except Exception:
-        pass  # template-rebuild is optional; upgrade succeeded
+    click.echo(
+        "\nIf the Agent SDK pin changed in this release, rebuild the E2B template"
+        " (~60s and E2B credits):\n  uv run python build_template.py"
+    )
 
 
 @cli.command()
@@ -882,26 +862,14 @@ def upgrade(yes: bool) -> None:
 def doctor(deep: bool) -> None:
     """Run first-run preflight checks. Prints a colored pass/fail table with fix hints."""
     load_dotenv()
-    from .doctor import run_checks
+    from .doctor import print_check_table, run_checks
 
     try:
         results = asyncio.run(run_checks(deep=deep))
     except KeyboardInterrupt as exc:
         raise SystemExit(130) from exc
 
-    all_passed = True
-    click.echo("\nSandstorm preflight:\n")
-    for check in results:
-        icon = click.style("✓", fg="green") if check.passed else click.style("✗", fg="red")
-        name = check.name.ljust(30)
-        detail = check.detail
-        click.echo(f"  {icon}  {name}  {detail}")
-        if not check.passed:
-            all_passed = False
-            if check.hint:
-                click.echo(f"        {click.style('fix:', fg='yellow')} {check.hint}")
-    click.echo()
-    if not all_passed:
+    if not print_check_table(results, header="Sandstorm preflight"):
         raise SystemExit(1)
 
 
@@ -955,7 +923,7 @@ def replay(
     from .sandbox import run_agent_in_sandbox
     from .store import run_store
 
-    original = run_store._index.get(run_id)
+    original = run_store.get(run_id)
     if original is None:
         click.echo(f"Error: run_id {run_id!r} not found in run store", err=True)
         raise SystemExit(1)
@@ -1371,31 +1339,22 @@ def slack_setup() -> None:
 
 @slack.command("verify")
 def slack_verify() -> None:
-    """Run Slack-only subset of `ds doctor` — verify bot token, signing secret, app token."""
+    """Run the Slack-only subset of `ds doctor`: bot token, signing secret, app token."""
     load_dotenv()
-    from .doctor import _probe_slack
+    from .doctor import Check, _probe_slack, print_check_table
 
     slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
     if not slack_token:
-        click.echo(click.style("✗", fg="red") + "  SLACK_BOT_TOKEN not set")
-        click.echo(
-            f"        {click.style('fix:', fg='yellow')} "
-            "run `ds slack setup` or set SLACK_BOT_TOKEN in .env"
+        missing = Check(
+            name="SLACK_BOT_TOKEN",
+            passed=False,
+            detail="not set",
+            hint="run `ds slack setup` or set SLACK_BOT_TOKEN in .env",
         )
+        print_check_table([missing], header="Slack preflight")
         raise SystemExit(1)
 
-    checks = _probe_slack(slack_token)
-    all_passed = True
-    click.echo("\nSlack preflight:\n")
-    for check in checks:
-        icon = click.style("✓", fg="green") if check.passed else click.style("✗", fg="red")
-        click.echo(f"  {icon}  {check.name.ljust(30)}  {check.detail}")
-        if not check.passed:
-            all_passed = False
-            if check.hint:
-                click.echo(f"        {click.style('fix:', fg='yellow')} {check.hint}")
-    click.echo()
-    if not all_passed:
+    if not print_check_table(_probe_slack(slack_token), header="Slack preflight"):
         raise SystemExit(1)
 
 

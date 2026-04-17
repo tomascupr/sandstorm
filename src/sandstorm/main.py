@@ -264,9 +264,6 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
         request.model,
     )
 
-    # Persist any request-level memory before the run; memory_store is a no-op
-    # when remember is None. Done here rather than inside the async generator
-    # so the write happens synchronously before we start streaming.
     if request.remember:
         memory_store.remember(request.team_id, request.user_id, request.remember)
 

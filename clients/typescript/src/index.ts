@@ -109,22 +109,26 @@ async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncIterable<
 
 function parseSSEEvent(raw: string): SSEEvent | null {
   const lines = raw.split(/\r?\n/);
-  let data = "";
+  const dataLines: string[] = [];
   let event: string | undefined;
   for (const line of lines) {
     if (!line || line.startsWith(":")) continue; // comments / keepalives
     if (line.startsWith("data:")) {
-      data += line.slice(5).trimStart();
+      // Per SSE spec: strip a single leading space after the colon; multiple
+      // data lines are joined with "\n" to reconstruct multi-line payloads.
+      const raw = line.slice(5);
+      dataLines.push(raw.startsWith(" ") ? raw.slice(1) : raw);
     } else if (line.startsWith("event:")) {
       event = line.slice(6).trim();
     }
   }
-  if (!data) return null;
+  if (dataLines.length === 0) return null;
+  const data = dataLines.join("\n");
   let json: unknown = null;
   try {
     json = JSON.parse(data);
   } catch {
-    // non-JSON SSE payload — leave `json` null
+    // non-JSON SSE payload: leave `json` null
   }
   return { data, json, event };
 }

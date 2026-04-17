@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from .memory import memory_store
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
-from .store import run_store
+from .store import build_config_snapshot, run_store
 
 if TYPE_CHECKING:
     from slack_bolt.async_app import AsyncApp
@@ -359,11 +359,13 @@ async def _stream_to_slack(
         channel_id=channel,
         thread_ts=thread_ts,
         sandbox_id=sandbox_id,
-        config_snapshot={
-            "model": request.model,
-            "allowed_tools": request.allowed_tools,
-            "timeout": request.timeout,
-        },
+        config_snapshot=build_config_snapshot(
+            {
+                "model": request.model,
+                "allowed_tools": request.allowed_tools,
+                "timeout": request.timeout,
+            }
+        ),
     )
 
     try:
@@ -412,10 +414,6 @@ async def _stream_to_slack(
                         if set_status:
                             await set_status(f"Using {tool_name}...")
                         else:
-                            # @mention path has no set_status — inline a compact
-                            # tool breadcrumb in the main stream so the user can
-                            # see what the agent is doing instead of silent
-                            # pauses during long tool chains.
                             try:
                                 await streamer.append(
                                     markdown_text=f"\n_:hammer_and_wrench: {tool_name}_\n"
@@ -555,15 +553,12 @@ def create_slack_app(
         process_before_response=process_before_response,
     )
 
-    # Sandbox reuse pool: (team_id, channel, thread_ts) -> (sandbox_id, lock)
-    # Lock serializes concurrent @mentions in the same thread. Including team_id
-    # in the key is defensive for future multi-workspace deployments and prevents
-    # cross-workspace collisions if the same channel/thread IDs ever collide.
+    # Sandbox reuse pool: (team_id, channel, thread_ts) -> (sandbox_id, lock).
+    # Lock serializes concurrent @mentions in the same thread.
     _sandbox_pool: dict[tuple[str, str, str], tuple[str | None, asyncio.Lock]] = {}
 
-    # Per-thread model override set via /model slash command. Keyed the same as
-    # _sandbox_pool. In-memory only — intentionally lost on restart so a thread's
-    # model reverts to the sandstorm.json default after redeploy.
+    # Per-user-per-channel model override from /model. In-memory only:
+    # intentionally lost on restart so overrides don't outlive the process.
     _thread_model_overrides: dict[tuple[str, str, str], str] = {}
 
     # ── Shared helpers (close over _sandbox_pool) ──
@@ -592,8 +587,9 @@ def create_slack_app(
             file_list = "\n".join(f"- /home/user/{f}" for f in all_files)
             full_prompt += f"\n\nFiles available in your working directory:\n{file_list}"
 
-        override_key = (team_id or "", channel, thread_ts)
-        model_override = _thread_model_overrides.get(override_key)
+        model_override = _thread_model_overrides.get(
+            (team_id or "", channel, f"user:{user_id or ''}")
+        )
         request = _build_query_request(
             full_prompt,
             text_files or None,
@@ -602,27 +598,11 @@ def create_slack_app(
             model=model_override,
         )
 
-        # Resume the prior agent session in this thread so the model keeps its
-        # transcript + planning state across messages. Falls back to the
-        # _gather_thread_context text-based approach if no session_id is saved.
-        prior_session_id = _find_thread_session(team_id, channel, thread_ts)
-        if prior_session_id:
-            request.resume = prior_session_id
+        prior_run = run_store.find_thread_session(team_id, channel, thread_ts)
+        if prior_run and prior_run.agent_session_id:
+            request.resume = prior_run.agent_session_id
 
         return request, binary_files
-
-    def _find_thread_session(team_id: str | None, channel: str, thread_ts: str) -> str | None:
-        """Most recent completed Run in this thread that recorded a session_id."""
-        for run in reversed(run_store._runs):
-            if (
-                run.team_id == team_id
-                and run.channel_id == channel
-                and run.thread_ts == thread_ts
-                and run.agent_session_id
-                and run.status == "completed"
-            ):
-                return run.agent_session_id
-        return None
 
     async def _run_in_sandbox_pool(
         *,
@@ -637,9 +617,16 @@ def create_slack_app(
         set_status: Callable | None = None,
     ) -> dict:
         """Run agent with sandbox reuse, pool management, and eviction."""
-        key = (context.get("team_id") or "", channel, thread_ts)
+        team_id = context.get("team_id") or ""
+        key = (team_id, channel, thread_ts)
         if key not in _sandbox_pool:
-            _sandbox_pool[key] = (None, asyncio.Lock())
+            # Cold start (or server restart). Look up the prior Run for this
+            # thread and resume its paused sandbox if it still exists; E2B's
+            # connect() auto-resumes. On failure the generic reuse-error path
+            # handles the fallback.
+            prior = run_store.find_thread_session(team_id, channel, thread_ts)
+            initial_id = prior.sandbox_id if prior else None
+            _sandbox_pool[key] = (initial_id, asyncio.Lock())
         _, lock = _sandbox_pool[key]
 
         async with lock:
@@ -927,28 +914,31 @@ def create_slack_app(
     @app.command("/model")
     async def handle_model(ack, command, respond):
         await ack()
+        # Slash commands do not carry thread_ts, so /model scopes to
+        # (team, channel, user) instead of per-thread. The override then
+        # applies to that user's next @mention or DM in this channel.
         model = (command.get("text") or "").strip()
-        channel = command.get("channel_id") or ""
-        thread_ts = command.get("thread_ts") or command.get("trigger_id") or ""
         team_id = command.get("team_id") or ""
-        key = (team_id, channel, thread_ts)
+        channel = command.get("channel_id") or ""
+        user_id = command.get("user_id") or ""
+        key = (team_id, channel, f"user:{user_id}")
         if not model:
             current = _thread_model_overrides.get(key)
             await respond(
                 text=(
-                    f"Current thread model override: `{current}`"
+                    f"Current model override in this channel: `{current}`"
                     if current
-                    else "No model override set for this thread."
+                    else "No model override set in this channel."
                 )
                 + " Pass a model name to set one: `/model claude-haiku-4-5-20251001`."
             )
             return
         if model.lower() in {"clear", "reset", "none"}:
             _thread_model_overrides.pop(key, None)
-            await respond(text="Cleared model override — thread will use the configured default.")
+            await respond(text="Cleared model override. Will use the configured default.")
             return
         _thread_model_overrides[key] = model
-        await respond(text=f"Model override set for this thread: `{model}`")
+        await respond(text=f"Model override set for this channel: `{model}`")
 
     return app
 

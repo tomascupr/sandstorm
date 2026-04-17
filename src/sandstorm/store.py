@@ -1,11 +1,15 @@
 import json
 import logging
 from collections import deque
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 logger = logging.getLogger(__name__)
+
+RunStatus = Literal["running", "completed", "error"]
 
 
 @dataclass
@@ -13,7 +17,7 @@ class Run:
     id: str
     prompt: str
     model: str | None
-    status: str  # "running", "completed", "error"
+    status: RunStatus
     started_at: str
     cost_usd: float | None = None
     num_turns: int | None = None
@@ -22,23 +26,34 @@ class Run:
     files_count: int = 0
     feedback: str | None = None
     feedback_user: str | None = None
-    # Untruncated prompt — needed for `ds replay` (distinct from the 100-char display `prompt`)
+    # Untruncated, distinct from the 100-char display `prompt`; needed for ds replay.
     raw_prompt: str = ""
-    # Captured from runner.mjs on completion — enables Agent SDK session resume
     agent_session_id: str | None = None
-    # Captured at sandbox creation — enables E2B pause/resume across Slack messages
     sandbox_id: str | None = None
-    # Slack thread context — nullable for CLI/HTTP runs
     team_id: str | None = None
     user_id: str | None = None
     channel_id: str | None = None
     thread_ts: str | None = None
-    # Snapshot of runtime config (model, allowed_tools, mcp_servers, files)
-    # so replays can reproduce the original run deterministically
+    # Only the keys explicitly allowed by `_CONFIG_SNAPSHOT_KEYS` are written here;
+    # env / secret / mcp_servers values are intentionally excluded to keep the
+    # JSONL file free of credentials.
     config_snapshot: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
+
+
+# Whitelist of sandstorm.json / QueryRequest keys that are safe to snapshot into
+# a Run record for `ds replay`. Widen with care — env maps, raw file contents,
+# and mcp_servers configs often carry secrets.
+_CONFIG_SNAPSHOT_KEYS = frozenset({"model", "max_turns", "timeout", "allowed_tools"})
+
+
+def build_config_snapshot(source: dict | None) -> dict | None:
+    """Return a filtered copy of `source` containing only replay-safe keys."""
+    if not source:
+        return None
+    return {k: v for k, v in source.items() if k in _CONFIG_SNAPSHOT_KEYS}
 
 
 class RunStore:
@@ -137,6 +152,35 @@ class RunStore:
         runs = list(self._runs)
         runs.reverse()  # newest first
         return [r.to_dict() for r in runs[:limit]]
+
+    def get(self, run_id: str) -> Run | None:
+        """Return the Run with this id, or None. O(1)."""
+        return self._index.get(run_id)
+
+    def find_most_recent(self, predicate: Callable[[Run], bool]) -> Run | None:
+        """Return the most recent Run matching the predicate, or None."""
+        for run in reversed(self._runs):
+            if predicate(run):
+                return run
+        return None
+
+    def find_thread_session(
+        self, team_id: str | None, channel_id: str, thread_ts: str
+    ) -> Run | None:
+        """Return the most recent completed Run in this Slack thread, if any.
+
+        Used by slack.py to pick up a prior agent_session_id (Agent SDK resume)
+        and sandbox_id (E2B pause/resume) when the in-memory pool misses,
+        including after a server restart.
+        """
+        return self.find_most_recent(
+            lambda r: (
+                r.team_id == team_id
+                and r.channel_id == channel_id
+                and r.thread_ts == thread_ts
+                and r.status == "completed"
+            )
+        )
 
     def _append_to_file(self, run: Run) -> None:
         try:

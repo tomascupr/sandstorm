@@ -30,6 +30,23 @@ class Check:
     hint: str = ""
 
 
+def print_check_table(checks: list[Check], header: str = "Preflight") -> bool:
+    """Print a colored ✓/✗ table to stdout. Returns True when every check passed."""
+    import click
+
+    all_passed = True
+    click.echo(f"\n{header}:\n")
+    for check in checks:
+        icon = click.style("✓", fg="green") if check.passed else click.style("✗", fg="red")
+        click.echo(f"  {icon}  {check.name.ljust(30)}  {check.detail}")
+        if not check.passed:
+            all_passed = False
+            if check.hint:
+                click.echo(f"        {click.style('fix:', fg='yellow')} {check.hint}")
+    click.echo()
+    return all_passed
+
+
 async def run_checks(*, deep: bool = False) -> list[Check]:
     """Return an ordered list of checks.
 
@@ -169,15 +186,14 @@ def _probe_anthropic(key: str) -> tuple[bool, str]:
 
 
 async def _probe_e2b(api_key: str) -> tuple[bool, str]:
-    """Attempt to list sandboxes — validates the API key without spinning up compute."""
+    """Validate the API key without spinning up compute."""
     from e2b import AsyncSandbox, AuthenticationException
 
     try:
         sandboxes = AsyncSandbox.list(api_key=api_key)
-        # AsyncSandbox.list returns a paginated iterator; pulling one page is enough
-        page = await sandboxes.next_items() if hasattr(sandboxes, "next_items") else None
-        count = len(page) if page is not None else 0
-        return True, f"OK ({count} sandbox{'es' if count != 1 else ''} visible)"
+        if hasattr(sandboxes, "next_items"):
+            await sandboxes.next_items()
+        return True, "OK"
     except AuthenticationException:
         return False, "invalid API key (401)"
     except Exception as exc:
