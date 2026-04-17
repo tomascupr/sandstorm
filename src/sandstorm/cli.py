@@ -1237,16 +1237,73 @@ def slack_setup() -> None:
     except Exception as exc:
         click.echo(f"\n  Warning: Could not verify token: {exc}", err=True)
 
-    # Step 4: Save to .env
+    # Step 4: Collect signing secret (required for HTTP mode + slash-command verification)
+    click.echo(
+        "  Signing secret (Basic Information → Signing Secret on your app page).\n"
+        "  Required for Slack slash commands and HTTP mode."
+    )
+    signing_secret = click.prompt(
+        "  Signing Secret", type=str, default="", show_default=False
+    ).strip()
+    if signing_secret and len(signing_secret) < 32:
+        click.echo(
+            f"  Warning: signing secret looks short ({len(signing_secret)} chars). "
+            "If Slack rejects requests, double-check.",
+            err=True,
+        )
+
+    # Step 5: Save to .env
     env_path = str(Path.cwd() / ".env")
     set_key(env_path, "SLACK_BOT_TOKEN", bot_token)
     set_key(env_path, "SLACK_APP_TOKEN", app_token)
-    click.echo("  Saved SLACK_BOT_TOKEN and SLACK_APP_TOKEN to .env\n")
+    saved_vars = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]
+    if signing_secret:
+        set_key(env_path, "SLACK_SIGNING_SECRET", signing_secret)
+        saved_vars.append("SLACK_SIGNING_SECRET")
+    click.echo(f"  Saved {', '.join(saved_vars)} to .env\n")
 
-    # Step 5: Optionally start
+    # Slash commands require the `commands` bot scope. If the user is upgrading
+    # from a pre-v0.9 install, they need to reinstall so Slack re-grants scopes.
+    click.echo(
+        "  Note: Sandstorm v0.9+ adds slash commands (/remember, /forget,\n"
+        "  /memories, /model). If you're upgrading an existing install, reinstall\n"
+        "  the app in your workspace to pick up the new `commands` scope.\n"
+    )
+
+    # Step 6: Optionally start
     if click.confirm("  Start the bot now?", default=True):
         click.echo()
         _do_slack_start_socket()
+
+
+@slack.command("verify")
+def slack_verify() -> None:
+    """Run Slack-only subset of `ds doctor` — verify bot token, signing secret, app token."""
+    load_dotenv()
+    from .doctor import _probe_slack
+
+    slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not slack_token:
+        click.echo(click.style("✗", fg="red") + "  SLACK_BOT_TOKEN not set")
+        click.echo(
+            f"        {click.style('fix:', fg='yellow')} "
+            "run `ds slack setup` or set SLACK_BOT_TOKEN in .env"
+        )
+        raise SystemExit(1)
+
+    checks = _probe_slack(slack_token)
+    all_passed = True
+    click.echo("\nSlack preflight:\n")
+    for check in checks:
+        icon = click.style("✓", fg="green") if check.passed else click.style("✗", fg="red")
+        click.echo(f"  {icon}  {check.name.ljust(30)}  {check.detail}")
+        if not check.passed:
+            all_passed = False
+            if check.hint:
+                click.echo(f"        {click.style('fix:', fg='yellow')} {check.hint}")
+    click.echo()
+    if not all_passed:
+        raise SystemExit(1)
 
 
 @slack.command("start")
