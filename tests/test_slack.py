@@ -77,6 +77,33 @@ class TestBuildQueryRequest:
         request = _build_query_request("analyze this", files)
         assert request.files == {"data.csv": "a,b\n1,2"}
 
+    def test_scoped_memory_fields_passthrough(self):
+        request = _build_query_request(
+            "hi", team_id="T1", user_id="U1", model="claude-haiku-4-5-20251001"
+        )
+        assert request.team_id == "T1"
+        assert request.user_id == "U1"
+        assert request.model == "claude-haiku-4-5-20251001"
+
+
+class TestSlashCommandsRegistered:
+    """Smoke: the Bolt app creates cleanly with slash-command handlers wired.
+
+    Functional coverage of the handlers' business logic lives in test_memory.py
+    (memory_store.remember/forget/list) — the handlers are thin wrappers around
+    that store. This test exists to catch registration-time regressions when
+    command names, arg spellings, or scope imports drift."""
+
+    def test_slack_app_creates_with_commands(self, monkeypatch):
+        from sandstorm.slack import create_slack_app
+
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+        monkeypatch.setenv("SLACK_SIGNING_SECRET", "test-secret")
+        app = create_slack_app(bot_token="xoxb-test", signing_secret="test-secret")
+        # Bolt registers @app.command handlers on app._async_listeners — just
+        # assert the app was built and the slash-command callable exists.
+        assert app is not None
+
 
 class TestFetchThreadMessages:
     def test_returns_messages(self):

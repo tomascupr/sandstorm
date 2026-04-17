@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from .memory import memory_store
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
 from .store import run_store
@@ -101,14 +102,23 @@ def _build_metadata_blocks(
 # ── Query builder ─────────────────────────────────────────────────────────────
 
 
-def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> QueryRequest:
+def _build_query_request(
+    prompt: str,
+    files: dict[str, str] | None = None,
+    team_id: str | None = None,
+    user_id: str | None = None,
+    model: str | None = None,
+) -> QueryRequest:
     """Build QueryRequest from prompt, deferring model/timeout to sandstorm.json.
+
+    When team_id/user_id are passed, the server-side memory injection in
+    config._build_agent_config will scope remembered context to that user.
 
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
     return QueryRequest(
         prompt=prompt,
-        model=None,
+        model=model,
         timeout=None,
         files=files,
         output_format={},  # Slack is conversational — skip structured output
@@ -116,6 +126,8 @@ def _build_query_request(prompt: str, files: dict[str, str] | None = None) -> Qu
         e2b_api_key=None,
         openrouter_api_key=None,
         max_turns=None,
+        team_id=team_id,
+        user_id=user_id,
     )
 
 
@@ -500,14 +512,27 @@ def create_slack_app(
         process_before_response=process_before_response,
     )
 
-    # Sandbox reuse pool: (channel, thread_ts) -> (sandbox_id, lock)
-    # Lock serializes concurrent @mentions in the same thread
-    _sandbox_pool: dict[tuple[str, str], tuple[str | None, asyncio.Lock]] = {}
+    # Sandbox reuse pool: (team_id, channel, thread_ts) -> (sandbox_id, lock)
+    # Lock serializes concurrent @mentions in the same thread. Including team_id
+    # in the key is defensive for future multi-workspace deployments and prevents
+    # cross-workspace collisions if the same channel/thread IDs ever collide.
+    _sandbox_pool: dict[tuple[str, str, str], tuple[str | None, asyncio.Lock]] = {}
+
+    # Per-thread model override set via /model slash command. Keyed the same as
+    # _sandbox_pool. In-memory only — intentionally lost on restart so a thread's
+    # model reverts to the sandstorm.json default after redeploy.
+    _thread_model_overrides: dict[tuple[str, str, str], str] = {}
 
     # ── Shared helpers (close over _sandbox_pool) ──
 
     async def _prepare_prompt(
-        client, channel: str, thread_ts: str, bot_user_id: str, prompt: str
+        client,
+        channel: str,
+        thread_ts: str,
+        bot_user_id: str,
+        prompt: str,
+        team_id: str | None = None,
+        user_id: str | None = None,
     ) -> tuple[QueryRequest, dict[str, bytes]]:
         """Fetch thread context, resolve names, download files, build request."""
         messages = await _fetch_thread_messages(client, channel, thread_ts)
@@ -524,7 +549,15 @@ def create_slack_app(
             file_list = "\n".join(f"- /home/user/{f}" for f in all_files)
             full_prompt += f"\n\nFiles available in your working directory:\n{file_list}"
 
-        request = _build_query_request(full_prompt, text_files or None)
+        override_key = (team_id or "", channel, thread_ts)
+        model_override = _thread_model_overrides.get(override_key)
+        request = _build_query_request(
+            full_prompt,
+            text_files or None,
+            team_id=team_id,
+            user_id=user_id,
+            model=model_override,
+        )
         return request, binary_files
 
     async def _run_in_sandbox_pool(
@@ -540,7 +573,7 @@ def create_slack_app(
         set_status: Callable | None = None,
     ) -> dict:
         """Run agent with sandbox reuse, pool management, and eviction."""
-        key = (channel, thread_ts)
+        key = (context.get("team_id") or "", channel, thread_ts)
         if key not in _sandbox_pool:
             _sandbox_pool[key] = (None, asyncio.Lock())
         _, lock = _sandbox_pool[key]
@@ -645,7 +678,13 @@ def create_slack_app(
 
         run_id = uuid.uuid4().hex[:8]
         request, binary_files = await _prepare_prompt(
-            client, channel, thread_ts, bot_user_id, prompt
+            client,
+            channel,
+            thread_ts,
+            bot_user_id,
+            prompt,
+            team_id=context.get("team_id"),
+            user_id=user_id,
         )
         await _run_in_sandbox_pool(
             request=request,
@@ -703,7 +742,13 @@ def create_slack_app(
         await set_status("Spinning up sandbox...")
         run_id = uuid.uuid4().hex[:8]
         request, binary_files = await _prepare_prompt(
-            client, channel_id, thread_ts, bot_user_id, prompt
+            client,
+            channel_id,
+            thread_ts,
+            bot_user_id,
+            prompt,
+            team_id=context.get("team_id"),
+            user_id=user_id,
         )
         await _run_in_sandbox_pool(
             request=request,
@@ -760,6 +805,86 @@ def create_slack_app(
             emoji="\U0001f44e",
             label="found this not helpful",
         )
+
+    # ── 4. Memory + model slash commands ──
+    #
+    # /remember <text>           persist a fact for (team_id, user_id)
+    # /forget <substring>        tombstone memories containing substring
+    # /memories                  list live memories
+    # /model <name>              override the model for this thread until restart
+    #
+    # All four are scoped to (team_id, user_id). Slack requires the `commands`
+    # bot scope for these to appear in the workspace — see slack-manifest.yaml.
+
+    def _command_scope(command) -> tuple[str | None, str | None]:
+        return command.get("team_id"), command.get("user_id")
+
+    @app.command("/remember")
+    async def handle_remember(ack, command, respond):
+        await ack()
+        text = (command.get("text") or "").strip()
+        if not text:
+            await respond(text="Usage: `/remember <fact>`. Example: `/remember likes oat milk`.")
+            return
+        team_id, user_id = _command_scope(command)
+        memory_store.remember(team_id, user_id, text)
+        await respond(text=f"Remembered: _{text}_")
+
+    @app.command("/forget")
+    async def handle_forget(ack, command, respond):
+        await ack()
+        substring = (command.get("text") or "").strip()
+        if not substring:
+            await respond(
+                text=(
+                    "Usage: `/forget <substring>`. Example: `/forget oat milk`."
+                    " Forgets every memory whose text contains the substring (case-insensitive)."
+                )
+            )
+            return
+        team_id, user_id = _command_scope(command)
+        deleted = memory_store.forget(team_id, user_id, substring)
+        if deleted:
+            await respond(text=f"Forgot {deleted} memor{'y' if deleted == 1 else 'ies'}.")
+        else:
+            await respond(text=f"No memory matched `{substring}`.")
+
+    @app.command("/memories")
+    async def handle_memories(ack, command, respond):
+        await ack()
+        team_id, user_id = _command_scope(command)
+        memories = memory_store.list(team_id, user_id)
+        if not memories:
+            await respond(text="No memories yet. Use `/remember <fact>` to add one.")
+            return
+        lines = [f"{i + 1}. {m.text}" for i, m in enumerate(memories)]
+        await respond(text="Your memories:\n" + "\n".join(lines))
+
+    @app.command("/model")
+    async def handle_model(ack, command, respond):
+        await ack()
+        model = (command.get("text") or "").strip()
+        channel = command.get("channel_id") or ""
+        thread_ts = command.get("thread_ts") or command.get("trigger_id") or ""
+        team_id = command.get("team_id") or ""
+        key = (team_id, channel, thread_ts)
+        if not model:
+            current = _thread_model_overrides.get(key)
+            await respond(
+                text=(
+                    f"Current thread model override: `{current}`"
+                    if current
+                    else "No model override set for this thread."
+                )
+                + " Pass a model name to set one: `/model claude-haiku-4-5-20251001`."
+            )
+            return
+        if model.lower() in {"clear", "reset", "none"}:
+            _thread_model_overrides.pop(key, None)
+            await respond(text="Cleared model override — thread will use the configured default.")
+            return
+        _thread_model_overrides[key] = model
+        await respond(text=f"Model override set for this thread: `{model}`")
 
     return app
 

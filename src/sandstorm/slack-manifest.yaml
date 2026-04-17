@@ -17,6 +17,22 @@ features:
         message: "Compare these competitor pages..."
       - title: Draft content
         message: "Draft a summary from this document..."
+  slash_commands:
+    - command: /remember
+      description: Remember a fact for your future Sandstorm agent runs
+      usage_hint: "likes oat milk"
+      should_escape: false
+    - command: /forget
+      description: Forget any remembered fact containing a substring
+      usage_hint: "oat milk"
+      should_escape: false
+    - command: /memories
+      description: List the facts Sandstorm remembers for you
+      should_escape: false
+    - command: /model
+      description: Override the model used for this thread (ephemeral until restart)
+      usage_hint: "claude-haiku-4-5-20251001 | clear"
+      should_escape: false
 oauth_config:
   scopes:
     bot:
@@ -29,6 +45,7 @@ oauth_config:
       - im:history
       - files:read
       - reactions:write
+      - commands
 settings:
   event_subscriptions:
     bot_events:
