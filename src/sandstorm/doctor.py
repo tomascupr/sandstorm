@@ -19,8 +19,6 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-_REQUIRED_SLACK_SCOPES = ("commands", "chat:write", "app_mentions:read")
-
 
 @dataclass
 class Check:

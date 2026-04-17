@@ -23,7 +23,7 @@ from .e2b_api import webhook_request
 from .memory import memory_store
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
-from .store import run_store
+from .store import build_config_snapshot, run_store
 from .telemetry import (
     get_tracer,
     record_error,
@@ -277,6 +277,15 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
             team_id=request.team_id,
             user_id=request.user_id,
             raw_prompt=request.prompt,
+            config_snapshot=build_config_snapshot(
+                {
+                    "model": request.model,
+                    "max_turns": request.max_turns,
+                    "timeout": request.timeout,
+                    "allowed_tools": request.allowed_tools,
+                    "files": request.files,
+                }
+            ),
         )
         cost_usd = None
         num_turns = None

@@ -44,9 +44,10 @@ class Run:
 
 
 # Whitelist of sandstorm.json / QueryRequest keys that are safe to snapshot into
-# a Run record for `ds replay`. Widen with care — env maps, raw file contents,
-# and mcp_servers configs often carry secrets.
-_CONFIG_SNAPSHOT_KEYS = frozenset({"model", "max_turns", "timeout", "allowed_tools"})
+# a Run record for `ds replay`. Widen with care: env maps and mcp_servers
+# configs often carry secrets. `files` stays in because file contents were
+# already persisted in the prompt; excluding them breaks replay reproducibility.
+_CONFIG_SNAPSHOT_KEYS = frozenset({"model", "max_turns", "timeout", "allowed_tools", "files"})
 
 
 def build_config_snapshot(source: dict | None) -> dict | None:

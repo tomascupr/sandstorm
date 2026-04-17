@@ -85,6 +85,9 @@ export class SandstormClient {
 
 /** Parse an SSE response body into typed events. */
 async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncIterable<SSEEvent> {
+  // Guard against a misbehaving server / proxy that strips the "\n\n" event
+  // terminator; without a ceiling `buffer` would grow until the client OOMs.
+  const MAX_BUFFER_BYTES = 16 * 1024 * 1024;
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -93,6 +96,11 @@ async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncIterable<
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
+      if (buffer.length > MAX_BUFFER_BYTES) {
+        throw new Error(
+          `Sandstorm SSE: event exceeds ${MAX_BUFFER_BYTES} bytes without a terminator`,
+        );
+      }
       let boundary = buffer.indexOf("\n\n");
       while (boundary !== -1) {
         const rawEvent = buffer.slice(0, boundary);

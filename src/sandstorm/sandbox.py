@@ -427,17 +427,20 @@ async def run_agent_in_sandbox(
                 except Exception:
                     logger.warning("[%s] Task exception suppressed", request_id, exc_info=True)
             # Pause preserves filesystem + running processes and stops billing
-            # for compute. connect() on the next message auto-resumes.
+            # for compute. connect() on the next message auto-resumes. If pause
+            # fails, fall back to kill() so we never orphan a billable sandbox.
             try:
                 await sbx.pause()
                 logger.info("[%s] Paused sandbox %s", request_id, sbx.sandbox_id)
             except Exception:
-                logger.warning(
-                    "[%s] Failed to pause sandbox %s — leaving it running (timeout=%ds)",
+                logger.error(
+                    "[%s] Failed to pause sandbox %s — killing instead to avoid "
+                    "orphaning a billable sandbox",
                     request_id,
                     sbx.sandbox_id,
-                    timeout,
                     exc_info=True,
                 )
+                with contextlib.suppress(Exception):
+                    await sbx.kill()
         else:
             await _cleanup(task, sbx, request_id)

@@ -947,7 +947,7 @@ def replay(
             e2b_api_key=e2b_api_key,
             openrouter_api_key=openrouter_api_key,
             resume=original.agent_session_id,
-            fork_session=bool(original.agent_session_id) or None,
+            fork_session=True if original.agent_session_id else None,
             max_budget_usd=budget,
         )
     except Exception as exc:

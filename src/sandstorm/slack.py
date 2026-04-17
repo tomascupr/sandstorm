@@ -364,6 +364,7 @@ async def _stream_to_slack(
                 "model": request.model,
                 "allowed_tools": request.allowed_tools,
                 "timeout": request.timeout,
+                "files": request.files,
             }
         ),
     )

@@ -9,8 +9,10 @@ The agent never calls this as a tool — the host injects remembered content int
 `system_prompt_append` at query time via `as_prompt_prefix()`.
 """
 
+import contextlib
 import json
 import logging
+import os
 import uuid
 from collections import deque
 from dataclasses import asdict, dataclass
@@ -20,6 +22,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 _LOCAL_TEAM_ID = "__local__"
+# Memories often contain credentials ("my openai key is sk-..."). Keep the
+# on-disk file readable only by the owning user.
+_PRIVATE_FILE_MODE = 0o600
 
 
 @dataclass
@@ -102,8 +107,12 @@ class MemoryStore:
     def _append_to_file(self, memory: Memory) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
+            new_file = not self._path.exists()
             with self._path.open("a") as f:
                 f.write(json.dumps(memory.to_dict()) + "\n")
+            if new_file:
+                with contextlib.suppress(OSError):
+                    os.chmod(self._path, _PRIVATE_FILE_MODE)
         except OSError:
             logger.warning("MemoryStore: failed to write to %s", self._path, exc_info=True)
 
