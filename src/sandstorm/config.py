@@ -387,6 +387,11 @@ def _build_agent_config(
         "has_skills": has_skills,
         "allowed_tools": allowed_tools,
         "timeout": timeout,
+        # Session controls for resume / ds replay — passed verbatim to runner.mjs
+        # which maps them onto Agent SDK query() options.
+        "resume": request.resume,
+        "fork_session": request.fork_session,
+        "max_budget_usd": request.max_budget_usd,
     }
 
     return agent_config, merged_skills

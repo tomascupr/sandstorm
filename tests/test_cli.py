@@ -15,13 +15,23 @@ def _make_fake_run_agent_in_sandbox(seen=None):
         if seen is not None:
             seen["request_id"] = request_id
             seen["prompt"] = request.prompt
+            seen["request"] = request
         yield json.dumps(
             {
                 "type": "assistant",
                 "message": {"content": [{"type": "text", "text": f"handled: {request.prompt}"}]},
             }
         )
-        yield json.dumps({"type": "result", "subtype": "success", "num_turns": 1, "cost_usd": 0.0})
+        yield json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "num_turns": 1,
+                "cost_usd": 0.005,
+                "total_cost_usd": 0.005,
+                "model": request.model or "sonnet",
+            }
+        )
 
     return _run
 
@@ -690,3 +700,82 @@ class TestCli:
 
         assert result.exit_code == 1
         assert "URL must use http:// or https://" in result.output
+
+
+class TestReplay:
+    def test_replay_unknown_id_exits_with_error(self, tmp_path, monkeypatch):
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        # Point run_store at an empty JSONL so no runs are visible to replay
+        from sandstorm.store import RunStore
+
+        monkeypatch.setattr("sandstorm.store.run_store", RunStore(path=tmp_path / "runs.jsonl"))
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["replay", "nonexistent"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_replay_forks_session_and_reports_metrics(self, tmp_path, monkeypatch):
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        from sandstorm.store import RunStore
+
+        rs = RunStore(path=tmp_path / "runs.jsonl")
+        rs.create(
+            id="orig-1",
+            prompt="compare two things",
+            model="claude-opus-4-7",
+            raw_prompt="compare these two competitor pricing pages",
+            config_snapshot={
+                "model": "claude-opus-4-7",
+                "allowed_tools": ["Read", "Bash"],
+                "timeout": 300,
+            },
+        )
+        rs.complete(
+            id="orig-1",
+            cost_usd=0.15,
+            num_turns=8,
+            duration_secs=42.0,
+            model="claude-opus-4-7",
+            agent_session_id="sess_original_abc",
+        )
+        monkeypatch.setattr("sandstorm.store.run_store", rs)
+
+        import sandstorm.sandbox as sandbox
+
+        seen: dict = {}
+        monkeypatch.setattr(sandbox, "run_agent_in_sandbox", _make_fake_run_agent_in_sandbox(seen))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "replay",
+                "orig-1",
+                "--model",
+                "claude-haiku-4-5-20251001",
+                "--budget",
+                "0.05",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+        # Verify replay used the raw_prompt + forked the original session
+        req = seen["request"]
+        assert req.prompt == "compare these two competitor pricing pages"
+        assert req.model == "claude-haiku-4-5-20251001"
+        assert req.resume == "sess_original_abc"
+        assert req.fork_session is True
+        assert req.max_budget_usd == 0.05
+
+        # Report written to stderr (CliRunner captures stderr with output by default
+        # when mix_stderr=True, which is the default).
+        assert "Replay report" in result.output
+        assert "orig-1" in result.output
+        assert "claude-haiku-4-5-20251001" in result.output

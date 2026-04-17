@@ -92,6 +92,24 @@ class QueryRequest(BaseModel):
         description="Whitelist agents by name (subset of sandstorm.json). None = use all.",
     )
 
+    # Agent SDK session controls — enables ds replay and Slack thread resume
+    resume: str | None = Field(
+        default=None,
+        description=(
+            "Agent SDK session ID to resume. Combined with fork_session, lets `ds replay`"
+            " branch a prior session with a new model/config while preserving its transcript."
+        ),
+    )
+    fork_session: bool | None = Field(
+        default=None,
+        description="When resuming a session, fork into a new branch instead of continuing.",
+    )
+    max_budget_usd: float | None = Field(
+        default=None,
+        ge=0.0,
+        description="Hard cap on run cost in USD. Passed as maxBudgetUsd to the Agent SDK.",
+    )
+
     # User memory (context injection — not a tool the agent decides to call)
     team_id: str | None = Field(
         default=None,

@@ -780,6 +780,189 @@ def query(
         raise SystemExit(1) from exc
 
 
+@cli.command()
+@click.argument("run_id")
+@click.option("--model", "-m", default=None, help="Override the model used for the replay.")
+@click.option("--budget", type=float, default=None, help="Hard cap on replay cost in USD.")
+@click.option(
+    "--allowed-tools",
+    default=None,
+    help="Comma-separated tool whitelist override (e.g. 'Read,Bash').",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False, resolve_path=True),
+    default=None,
+    help="Write a markdown diff report to this file. Default: stdout when run completes.",
+)
+@click.option("--json-output", is_flag=True, help="Stream raw JSON events to stdout.")
+@click.option("--anthropic-api-key", default=None, help="Anthropic API key.")
+@click.option("--e2b-api-key", default=None, help="E2B API key.")
+@click.option("--openrouter-api-key", default=None, help="OpenRouter API key.")
+def replay(
+    run_id: str,
+    model: str | None,
+    budget: float | None,
+    allowed_tools: str | None,
+    output: str | None,
+    json_output: bool,
+    anthropic_api_key: str | None,
+    e2b_api_key: str | None,
+    openrouter_api_key: str | None,
+) -> None:
+    """Replay a prior run, optionally with a different model or tool set.
+
+    Forks the original Agent SDK session when the run recorded a session_id, so
+    the replay starts with the same transcript but a fresh branch. Useful for
+    A/B-comparing models, seeing what a cheaper model would have done, or
+    reproducing a run while a bug fix lands in the toolset.
+    """
+    load_dotenv()
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATEFMT,
+        stream=sys.stderr,
+    )
+
+    from .models import QueryRequest
+    from .sandbox import run_agent_in_sandbox
+    from .store import run_store
+
+    original = run_store._index.get(run_id)
+    if original is None:
+        click.echo(f"Error: run_id {run_id!r} not found in run store", err=True)
+        raise SystemExit(1)
+
+    snapshot = original.config_snapshot or {}
+    tools_override: list[str] | None = None
+    if allowed_tools is not None:
+        tools_override = [t.strip() for t in allowed_tools.split(",") if t.strip()]
+
+    try:
+        request = QueryRequest(
+            prompt=original.raw_prompt or original.prompt,
+            model=model or snapshot.get("model") or original.model,
+            max_turns=snapshot.get("max_turns"),
+            timeout=snapshot.get("timeout"),
+            files=snapshot.get("files"),
+            allowed_tools=(
+                tools_override if tools_override is not None else snapshot.get("allowed_tools")
+            ),
+            anthropic_api_key=anthropic_api_key,
+            e2b_api_key=e2b_api_key,
+            openrouter_api_key=openrouter_api_key,
+            resume=original.agent_session_id,
+            fork_session=bool(original.agent_session_id) or None,
+            max_budget_usd=budget,
+        )
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    import time as _time
+
+    replay_id = f"replay-{secrets.token_hex(3)}"
+    click.echo(
+        f"Replaying {run_id} as {replay_id} (model={request.model or 'default'}, "
+        f"fork_session={'yes' if request.fork_session else 'no'}).",
+        err=True,
+    )
+
+    start = _time.monotonic()
+    replay_cost = 0.0
+    replay_turns = 0
+    replay_model = request.model
+
+    async def _run() -> None:
+        nonlocal replay_cost, replay_turns, replay_model
+        async for line in run_agent_in_sandbox(request, replay_id):
+            if json_output:
+                click.echo(line)
+            else:
+                _print_event(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "result":
+                replay_cost = float(event.get("total_cost_usd") or event.get("cost_usd") or 0.0)
+                replay_turns = int(event.get("num_turns") or 0)
+                replay_model = event.get("model") or replay_model
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt as exc:
+        click.echo("Interrupted.", err=True)
+        raise SystemExit(130) from exc
+    except (ValueError, RuntimeError, SandboxException, AuthenticationException) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    duration = _time.monotonic() - start
+    report_lines = _format_replay_report(
+        original=original,
+        replay_id=replay_id,
+        replay_cost=replay_cost,
+        replay_turns=replay_turns,
+        replay_duration=duration,
+        replay_model=replay_model,
+        budget=budget,
+    )
+    report = "\n".join(report_lines)
+    if output:
+        Path(output).write_text(report + "\n")
+        click.echo(f"\nReport written to {output}", err=True)
+    else:
+        click.echo("\n" + report, err=True)
+
+
+def _format_replay_report(
+    *,
+    original,
+    replay_id: str,
+    replay_cost: float,
+    replay_turns: int,
+    replay_duration: float,
+    replay_model: str | None,
+    budget: float | None,
+) -> list[str]:
+    """Build a markdown diff table comparing the replay to the original run."""
+
+    def _delta(new: float, old: float | None) -> str:
+        if old is None:
+            return "n/a"
+        diff = new - old
+        pct = (diff / old * 100) if old else 0.0
+        arrow = "↓" if diff < 0 else ("↑" if diff > 0 else "→")
+        return f"{arrow} {diff:+.4f} ({pct:+.1f}%)"
+
+    lines = [
+        f"# Replay report: {original.id} → {replay_id}",
+        "",
+        "| Metric       | Original              | Replay                | Δ |",
+        "| ------------ | --------------------- | --------------------- | -- |",
+        f"| Model        | {original.model or 'default'} | {replay_model or 'default'} | — |",
+        f"| Cost (USD)   | {original.cost_usd if original.cost_usd is not None else 'n/a'} | "
+        f"{replay_cost:.4f} | {_delta(replay_cost, original.cost_usd)} |",
+        f"| Turns        | {original.num_turns if original.num_turns is not None else 'n/a'} | "
+        f"{replay_turns} | "
+        f"{_delta(float(replay_turns), float(original.num_turns or 0) or None)} |",
+        f"| Duration (s) | "
+        f"{original.duration_secs if original.duration_secs is not None else 'n/a'} | "
+        f"{replay_duration:.1f} | "
+        f"{_delta(replay_duration, original.duration_secs)} |",
+    ]
+    if budget is not None:
+        lines.append(f"| Budget cap   | n/a                   | ${budget:.2f}              | — |")
+    lines.append("")
+    lines.append(
+        f"> Forked session: {'yes' if original.agent_session_id else 'no prior session_id saved'}"
+    )
+    return lines
+
+
 # ── Webhook management ─────────────────────────────────────────────────────
 
 
