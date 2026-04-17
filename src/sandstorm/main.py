@@ -20,6 +20,7 @@ from .auth import load_api_keys, verify_api_token
 from .config import load_project_dotenv as load_dotenv
 from .config import load_sandstorm_config
 from .e2b_api import webhook_request
+from .memory import memory_store
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
 from .store import run_store
@@ -263,6 +264,12 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
         request.model,
     )
 
+    # Persist any request-level memory before the run; memory_store is a no-op
+    # when remember is None. Done here rather than inside the async generator
+    # so the write happens synchronously before we start streaming.
+    if request.remember:
+        memory_store.remember(request.team_id, request.user_id, request.remember)
+
     async def event_generator():
         start = time.monotonic()
         run_store.create(
@@ -270,6 +277,9 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
             prompt=request.prompt,
             model=request.model,
             files_count=len(request.files) if request.files else 0,
+            team_id=request.team_id,
+            user_id=request.user_id,
+            raw_prompt=request.prompt,
         )
         cost_usd = None
         num_turns = None

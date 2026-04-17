@@ -1,8 +1,13 @@
-"""Tests for the user-scoped MemoryStore."""
+"""Tests for the user-scoped MemoryStore and its injection into agent config."""
 
 import json
 
+import pytest
+
+import sandstorm.config as config_mod
+from sandstorm.config import _build_agent_config
 from sandstorm.memory import MemoryStore
+from sandstorm.models import QueryRequest
 
 
 class TestRememberAndList:
@@ -139,3 +144,73 @@ class TestDequeEviction:
         assert "m0" not in memories
         assert "m1" not in memories
         assert memories == ["m2", "m3", "m4"]
+
+
+@pytest.fixture()
+def _api_keys(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+
+@pytest.fixture(autouse=True)
+def _reset_loaded_dotenv(monkeypatch):
+    monkeypatch.setattr(config_mod, "_LOADED_DOTENV_VALUES", {})
+    monkeypatch.setattr(config_mod, "_env_mtime", 0.0)
+
+
+def _patched_store(monkeypatch, tmp_path) -> MemoryStore:
+    """Redirect the module-level memory_store used by config._build_agent_config
+    to a temp-path store so tests stay isolated from real `.sandstorm/`."""
+    store = MemoryStore(path=tmp_path / "m.jsonl")
+    monkeypatch.setattr(config_mod, "memory_store", store)
+    return store
+
+
+class TestMemoryInjection:
+    def test_no_memory_no_prefix(self, monkeypatch, tmp_path, _api_keys):
+        _patched_store(monkeypatch, tmp_path)
+        req = QueryRequest(prompt="hi", team_id="T1", user_id="U1")
+        config, _ = _build_agent_config(req, {}, {})
+        # Without any memories or env_append, system_prompt stays unset
+        assert config.get("system_prompt") is None
+
+    def test_memory_injected_as_append(self, monkeypatch, tmp_path, _api_keys):
+        store = _patched_store(monkeypatch, tmp_path)
+        store.remember("T1", "U1", "favourite db is postgres")
+        req = QueryRequest(prompt="hi", team_id="T1", user_id="U1")
+        config, _ = _build_agent_config(req, {}, {})
+        sys_prompt = config["system_prompt"]
+        assert isinstance(sys_prompt, str)
+        assert "User memory" in sys_prompt
+        assert "favourite db is postgres" in sys_prompt
+
+    def test_memory_prepended_to_existing_append(self, monkeypatch, tmp_path, _api_keys):
+        store = _patched_store(monkeypatch, tmp_path)
+        store.remember("T1", "U1", "ships to berlin")
+        req = QueryRequest(prompt="hi", team_id="T1", user_id="U1")
+        config, _ = _build_agent_config(
+            req,
+            {"system_prompt_append": "Follow project conventions."},
+            {},
+        )
+        sys_prompt = config["system_prompt"]
+        # Memory comes first, then the config append, so project conventions
+        # always land closest to the prompt (highest-precedence instruction)
+        conv = sys_prompt.index("Follow project conventions.")
+        assert sys_prompt.index("ships to berlin") < conv
+
+    def test_memory_scoped_to_user(self, monkeypatch, tmp_path, _api_keys):
+        store = _patched_store(monkeypatch, tmp_path)
+        store.remember("T1", "U1", "user-one preference")
+        store.remember("T1", "U2", "user-two preference")
+        req = QueryRequest(prompt="hi", team_id="T1", user_id="U1")
+        config, _ = _build_agent_config(req, {}, {})
+        assert "user-one preference" in config["system_prompt"]
+        assert "user-two preference" not in (config["system_prompt"] or "")
+
+    def test_no_team_context_uses_local_scope(self, monkeypatch, tmp_path, _api_keys):
+        store = _patched_store(monkeypatch, tmp_path)
+        store.remember(None, None, "local-only fact")
+        req = QueryRequest(prompt="hi")  # no team_id / user_id
+        config, _ = _build_agent_config(req, {}, {})
+        assert "local-only fact" in config["system_prompt"]

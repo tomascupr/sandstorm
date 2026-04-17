@@ -92,6 +92,26 @@ class QueryRequest(BaseModel):
         description="Whitelist agents by name (subset of sandstorm.json). None = use all.",
     )
 
+    # User memory (context injection — not a tool the agent decides to call)
+    team_id: str | None = Field(
+        default=None,
+        description=(
+            "Scope for memory lookup/write. Slack workspaces pass their team_id;"
+            " CLI/HTTP runs default to '__local__' when omitted."
+        ),
+    )
+    user_id: str | None = Field(
+        default=None,
+        description="Scope for memory lookup/write. Defaults to '__local__'.",
+    )
+    remember: str | None = Field(
+        default=None,
+        description=(
+            "Optional memory text to persist for (team_id, user_id) before the run."
+            " Also available via Slack slash command /remember."
+        ),
+    )
+
     # Extra inline definitions (merged before whitelisting)
     extra_agents: dict[str, dict] | None = Field(
         default=None,
