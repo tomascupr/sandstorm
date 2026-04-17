@@ -1,6 +1,6 @@
 {
   "name": "@duvo/sandstorm-client",
-  "version": "0.1.0",
+  "version": "0.9.1",
   "description": "TypeScript client for the Sandstorm agent runtime — stream agent runs, manage memory, replay past runs.",
   "license": "MIT",
   "repository": {
