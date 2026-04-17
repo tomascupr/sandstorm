@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -92,6 +93,98 @@ def _auto_register_webhook() -> str | None:
         return None
 
 
+async def _setup_triggers(app: FastAPI):
+    """Load triggers from sandstorm.json, mount webhook routes, start cron."""
+    from .triggers import (
+        TriggerDefinition,
+        load_triggers,
+        render_prompt,
+        start_cron_scheduler,
+        verify_webhook_secret,
+    )
+
+    config = load_sandstorm_config()
+    if config is None:
+        return None
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        logger.error("Invalid triggers in sandstorm.json: %s", exc)
+        return None
+    if not triggers:
+        return None
+
+    async def _fire_trigger(trigger: TriggerDefinition, *, rendered: str | None = None) -> None:
+        prompt = rendered if rendered is not None else trigger.prompt
+        req_id = f"trigger-{trigger.name}-{uuid.uuid4().hex[:6]}"
+        try:
+            request = QueryRequest(
+                prompt=prompt,
+                model=None,
+                max_turns=None,
+                timeout=None,
+                files=None,
+                output_format={},
+                team_id="__trigger__",
+                user_id=trigger.name,
+                anthropic_api_key=None,
+                e2b_api_key=None,
+                openrouter_api_key=None,
+            )
+        except ValueError as exc:
+            logger.error("[%s] trigger %s: %s", req_id, trigger.name, exc)
+            return
+        run_store.create(
+            id=req_id,
+            prompt=prompt,
+            model=None,
+            team_id="__trigger__",
+            user_id=trigger.name,
+            raw_prompt=prompt,
+        )
+        try:
+            async for _line in run_agent_in_sandbox(request, req_id):
+                pass
+        except Exception:
+            logger.exception("[%s] trigger %s failed", req_id, trigger.name)
+            run_store.fail(req_id, "trigger execution failed")
+
+    for trigger in triggers:
+        if trigger.type != "webhook":
+            continue
+
+        def _make_handler(t: TriggerDefinition):
+            async def _handler(request: Request) -> JSONResponse:
+                header = request.headers.get("x-sandstorm-trigger-secret")
+                if not verify_webhook_secret(t.secret, header):
+                    return JSONResponse({"error": "invalid trigger secret"}, status_code=401)
+                try:
+                    body = await request.json()
+                except Exception:
+                    body = {}
+                rendered = render_prompt(
+                    t.prompt,
+                    body=body if isinstance(body, dict) else {"raw": body},
+                    headers=dict(request.headers),
+                )
+                # Fire-and-forget so the HTTP caller gets a fast 202
+                asyncio.create_task(_fire_trigger(t, rendered=rendered))
+                return JSONResponse({"status": "accepted", "trigger": t.name}, status_code=202)
+
+            return _handler
+
+        app.add_api_route(
+            trigger.path or "",
+            _make_handler(trigger),
+            methods=["POST"],
+            name=f"trigger_{trigger.name}",
+            summary=f"Sandstorm trigger: {trigger.name}",
+        )
+        logger.info("Mounted webhook trigger %s at %s", trigger.name, trigger.path)
+
+    return await start_cron_scheduler(triggers, lambda t: _fire_trigger(t, rendered=None))
+
+
 def _auto_deregister_webhook(webhook_id: str | None) -> None:
     """Deregister the auto-registered E2B webhook (best-effort cleanup)."""
     if webhook_id is None:
@@ -117,7 +210,10 @@ async def lifespan(app: FastAPI):
             "SANDSTORM_WEBHOOK_SECRET not set — webhook signature verification disabled"
         )
     webhook_id = _auto_register_webhook()
+    scheduler_task = await _setup_triggers(app)
     yield
+    if scheduler_task is not None:
+        scheduler_task.cancel()
     _auto_deregister_webhook(webhook_id)
 
 

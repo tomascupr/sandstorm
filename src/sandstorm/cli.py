@@ -1201,6 +1201,110 @@ def _require_http_url(url: str) -> None:
 
 
 @cli.group()
+def trigger() -> None:
+    """List and test Sandstorm triggers defined in sandstorm.json."""
+
+
+@trigger.command("list")
+def trigger_list() -> None:
+    """List active triggers with their next fire time."""
+    load_dotenv()
+    from .config import load_sandstorm_config
+    from .triggers import load_triggers
+
+    config = load_sandstorm_config()
+    if config is None:
+        click.echo("No sandstorm.json in the current directory.")
+        raise SystemExit(1)
+
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        click.echo(f"Invalid triggers: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    if not triggers:
+        click.echo("No triggers defined.")
+        return
+
+    from datetime import UTC as _UTC
+    from datetime import datetime as _dt
+
+    from croniter import croniter
+
+    click.echo(f"{'Name':<24} {'Type':<8} {'Details':<40} Next fire")
+    click.echo("-" * 90)
+    for t in triggers:
+        if t.type == "cron":
+            now = _dt.now(_UTC)
+            nxt = croniter(t.schedule or "", now).get_next(_dt)
+            next_str = nxt.strftime("%Y-%m-%d %H:%M:%S UTC")
+            click.echo(f"{t.name:<24} {t.type:<8} {t.schedule or '':<40} {next_str}")
+        elif t.type == "webhook":
+            secret_str = "secret-required" if t.secret else "OPEN (no secret)"
+            details = f"{t.path or ''} ({secret_str})"
+            click.echo(f"{t.name:<24} {t.type:<8} {details:<40} on-demand")
+        else:  # reaction
+            ch = ",".join(t.channels) or "<any channel>"
+            details = f":{t.emoji or ''}: in {ch}"
+            click.echo(f"{t.name:<24} {t.type:<8} {details:<40} on-reaction")
+
+
+@trigger.command("test")
+@click.argument("name")
+def trigger_test(name: str) -> None:
+    """Fire a trigger by name (skips cron / webhook auth — runs the prompt directly)."""
+    load_dotenv()
+    from .config import load_sandstorm_config
+    from .triggers import load_triggers
+
+    config = load_sandstorm_config()
+    if config is None:
+        click.echo("No sandstorm.json in the current directory.", err=True)
+        raise SystemExit(1)
+
+    try:
+        triggers = load_triggers(config)
+    except ValueError as exc:
+        click.echo(f"Invalid triggers: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    match = next((t for t in triggers if t.name == name), None)
+    if match is None:
+        choices = ", ".join(t.name for t in triggers) or "(none)"
+        click.echo(
+            f"Unknown trigger {name!r}. Defined triggers: {choices}",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    from .models import QueryRequest
+    from .sandbox import run_agent_in_sandbox
+
+    request = QueryRequest(
+        prompt=match.prompt,
+        model=None,
+        max_turns=None,
+        timeout=None,
+        files=None,
+        anthropic_api_key=None,
+        e2b_api_key=None,
+        openrouter_api_key=None,
+        team_id="__trigger__",
+        user_id=match.name,
+    )
+
+    async def _run() -> None:
+        async for line in run_agent_in_sandbox(request, f"trigger-{match.name}"):
+            _print_event(line)
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt as exc:
+        raise SystemExit(130) from exc
+
+
+@cli.group()
 def webhook() -> None:
     """Manage E2B lifecycle webhooks."""
 

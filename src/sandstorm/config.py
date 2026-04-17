@@ -150,6 +150,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "webhook_url": ((str,), "str"),
         "timeout": ((int,), "int"),
         "template_skills": ((bool,), "bool"),
+        "triggers": ((list,), "list"),
     }
 
     validated: dict = {}
