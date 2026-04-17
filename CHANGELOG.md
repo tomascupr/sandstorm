@@ -2,6 +2,42 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [0.9.0] - 2026-04-17
+
+### Bug Fixes
+
+- address /code-reviewer findings (H1–H3, M1, M3, L1, L2)
+
+### Documentation
+
+- README rewrite + comparison/FAQ/multi-llm/memory/replay
+- Langfuse/Phoenix/Langsmith setup + local compose
+
+### Features
+
+- TypeScript client @duvo/sandstorm-client
+- code-review starter for GitHub PR review agents
+- Railway template + Dockerfile polish
+- ds upgrade — in-place PyPI upgrade with template-rebuild prompt
+- polish ds slack setup + add ds slack verify
+- ds doctor preflight checks
+- inline tool breadcrumbs for @mention streaming
+- pause instead of keep-alive for Slack thread continuity
+- resume Agent SDK sessions across thread messages
+- ds replay with session fork, budget cap, markdown report
+- slash commands /remember /forget /memories /model
+- inject user memory into system_prompt at query time
+- add user-scoped MemoryStore mirroring RunStore
+- extend Run dataclass with replay/resume fields
+
+### Miscellaneous
+
+- upgrade Agent SDK to 0.2.112 and E2B to 2.20
+
+### Refactoring
+
+- fixes from /simplify review
+
 ## [0.8.1] - 2026-03-12
 
 ### Features
