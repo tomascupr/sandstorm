@@ -177,6 +177,46 @@ class TestLoadTriggers:
                 }
             )
 
+    def test_wildcard_and_specific_channel_same_emoji_rejected(self):
+        """If you have a wildcard trigger for :thumbsup: and a specific
+        trigger for :thumbsup: in #eng, any :thumbsup: in #eng would fire
+        both. Reject at load time so the operator picks one."""
+        import pytest
+
+        with pytest.raises(ValueError, match="double-fire"):
+            load_triggers(
+                {
+                    "triggers": [
+                        {
+                            "name": "global",
+                            "type": "reaction",
+                            "emoji": "thumbsup",
+                            "prompt": "global",
+                        },
+                        {
+                            "name": "specific",
+                            "type": "reaction",
+                            "emoji": "thumbsup",
+                            "channels": ["C1"],
+                            "prompt": "specific",
+                        },
+                    ]
+                }
+            )
+
+    def test_duplicate_wildcard_reaction_rejected(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="wildcard is defined twice"):
+            load_triggers(
+                {
+                    "triggers": [
+                        {"name": "a", "type": "reaction", "emoji": "eye", "prompt": "p"},
+                        {"name": "b", "type": "reaction", "emoji": "eye", "prompt": "p"},
+                    ]
+                }
+            )
+
     def test_parses_reaction(self):
         triggers = load_triggers(
             {
@@ -213,6 +253,27 @@ class TestRenderPrompt:
             safe_wrap=False,
         )
         assert out == " -- rest"
+
+    def test_nested_dict_renders_as_json_not_python_repr(self):
+        """A webhook whose body has a nested object should interpolate as JSON
+        (not Python repr with single quotes) so the agent reading the prompt
+        gets well-formed JSON it can parse back."""
+        out = render_prompt(
+            "Payload: {{body.user}}",
+            body={"user": {"id": 42, "name": "Alice"}},
+            safe_wrap=False,
+        )
+        assert '"id": 42' in out
+        assert '"name": "Alice"' in out
+        assert "'id'" not in out
+
+    def test_nested_list_renders_as_json(self):
+        out = render_prompt(
+            "Items: {{body.items}}",
+            body={"items": ["a", "b", "c"]},
+            safe_wrap=False,
+        )
+        assert out == 'Items: ["a", "b", "c"]'
 
     def test_scalar_reaction(self):
         out = render_prompt("reacted: {{reaction}}", reaction="thumbsup", safe_wrap=False)

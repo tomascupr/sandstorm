@@ -212,6 +212,35 @@ class TestThreeLevelScope:
         assert store.forget_by_id(bob.id, team_id="T2", user_id="UB") is False
         assert bob.deleted is False
 
+    def test_forget_team_requires_author_match(self, tmp_path):
+        """Team memories are shared, but only the original author can delete.
+        This keeps one tenant member from wiping another's workspace-wide
+        knowledge via `/forget team <text>`."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "alice team fact", scope="team")
+        store.remember("T1", "UB", "bob team fact", scope="team")
+
+        # Alice cannot delete Bob's team memory by matching text substring
+        deleted = store.forget("T1", "UA", "bob", scope="team")
+        assert deleted == 0
+        still_visible = {m.text for m in store.list("T1", "UB", scope="team")}
+        assert "bob team fact" in still_visible
+
+        # Alice CAN delete her own team memory
+        deleted = store.forget("T1", "UA", "alice", scope="team")
+        assert deleted == 1
+
+    def test_forget_by_id_team_scope_requires_author(self, tmp_path):
+        """Team-scoped forget_by_id must also gate by author, so a forged
+        memory_id from a Block Kit payload can't cross-delete."""
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        bob = store.remember("T1", "UB", "bob team fact", scope="team")
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UA", scope="team") is False
+        assert bob.deleted is False
+        # But Bob himself can
+        assert store.forget_by_id(bob.id, team_id="T1", user_id="UB", scope="team") is True
+        assert bob.deleted is True
+
     def test_back_compat_loads_pre_v091_rows(self, tmp_path):
         """Old JSONL rows without scope/channel_id default to user scope."""
         path = tmp_path / "m.jsonl"

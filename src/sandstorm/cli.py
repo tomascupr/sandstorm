@@ -420,6 +420,7 @@ def _resolve_toolpack_env_vars(toolpack: ToolpackDefinition) -> dict[str, str]:
 
 
 _CUSTOM_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+_CUSTOM_ENV_NAME_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
 
 
 def _build_custom_toolpack(
@@ -437,6 +438,14 @@ def _build_custom_toolpack(
             "(lower-case, digits, underscore, dash).",
             param_hint="--custom",
         )
+    for env_name in envs:
+        if not _CUSTOM_ENV_NAME_PATTERN.match(env_name):
+            raise click.BadParameter(
+                f"--env {env_name!r} must match {_CUSTOM_ENV_NAME_PATTERN.pattern} "
+                "(upper-case, digits, underscore, first char not a digit). "
+                "This catches typos like 'MY KEY' or '123BADNAME' at CLI time.",
+                param_hint="--env",
+            )
     # npx always wants a -y to skip the prompt; uvx runs the package directly.
     runtime_cmd = runtime.lower()
     command_args = ["-y", package, *args] if runtime_cmd == "npx" else [package, *args]

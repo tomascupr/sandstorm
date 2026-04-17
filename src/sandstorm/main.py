@@ -93,6 +93,22 @@ def _auto_register_webhook() -> str | None:
         return None
 
 
+_TRIGGER_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn_trigger_task(coro) -> asyncio.Task:
+    """Fire-and-forget a trigger coroutine, keeping a strong reference.
+
+    asyncio only holds weak references to tasks, so without a pinning set a
+    long agent run could be garbage-collected mid-flight. The done-callback
+    removes the task on completion so the set doesn't grow unbounded.
+    """
+    task = asyncio.create_task(coro)
+    _TRIGGER_TASKS.add(task)
+    task.add_done_callback(_TRIGGER_TASKS.discard)
+    return task
+
+
 async def _setup_triggers(app: FastAPI):
     """Load triggers from sandstorm.json, mount webhook routes, start cron."""
     from .triggers import (
@@ -174,7 +190,7 @@ async def _setup_triggers(app: FastAPI):
                     body=body if isinstance(body, dict) else {"raw": body},
                     headers=dict(request.headers),
                 )
-                asyncio.create_task(_fire_trigger(t, rendered=rendered))
+                _spawn_trigger_task(_fire_trigger(t, rendered=rendered))
                 return JSONResponse({"status": "accepted", "trigger": t.name}, status_code=202)
 
             return _handler
@@ -188,7 +204,13 @@ async def _setup_triggers(app: FastAPI):
         )
         logger.info("Mounted webhook trigger %s at %s", trigger.name, trigger.path)
 
-    return await start_cron_scheduler(triggers, lambda t: _fire_trigger(t, rendered=None))
+    async def _fire_cron(t: TriggerDefinition) -> None:
+        # Fire-and-forget so the cron scheduler's own loop doesn't block on
+        # the agent run — two co-scheduled triggers must fire together, not
+        # serialise behind a 5-minute agent on a 2-minute cron.
+        _spawn_trigger_task(_fire_trigger(t, rendered=None))
+
+    return await start_cron_scheduler(triggers, _fire_cron)
 
 
 def _auto_deregister_webhook(webhook_id: str | None) -> None:

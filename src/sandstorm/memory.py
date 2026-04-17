@@ -141,7 +141,10 @@ class MemoryStore:
             return False
         if memory.scope != scope:
             return False
-        if scope == "user" and memory.user_id != user:
+        if memory.user_id != user:
+            # Ownership gate: only the author can tombstone — applies to all
+            # scopes, so one tenant member can't wipe another's workspace-wide
+            # memory via a forged memory_id from any Block Kit payload.
             return False
         if scope == "channel" and memory.channel_id != channel_id:
             return False
@@ -162,6 +165,13 @@ class MemoryStore:
 
         When `scope` is None, matches across user + channel + team scopes the
         caller can see. Matching is case-insensitive.
+
+        Ownership rule: the caller can only forget memories they created —
+        including team and channel memories. This prevents one tenant member
+        from deleting another member's workspace-wide knowledge via a
+        `/forget team <text>` invocation. Memories created by other authors
+        are skipped silently; if nothing matched, the count is 0 and the UI
+        can surface "nothing to forget".
         """
         team, user = self._normalize_team_user(team_id, user_id)
         needle = substring.lower()
@@ -176,7 +186,8 @@ class MemoryStore:
                 continue
             if memory.team_id != team:
                 continue
-            if memory.scope == "user" and memory.user_id != user:
+            if memory.user_id != user:
+                # Ownership gate: only the original author can tombstone.
                 continue
             if memory.scope == "channel" and memory.channel_id != channel_id:
                 continue

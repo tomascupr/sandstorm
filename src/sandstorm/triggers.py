@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -140,13 +141,36 @@ def load_triggers(sandstorm_config: Mapping[str, object]) -> list[TriggerDefinit
                 raise ValueError(
                     f"trigger {name!r} `channels` must be a list of strings or omitted"
                 )
-            for channel_id in channels_tuple or ("*",):
-                key = (emoji, channel_id)
-                if key in seen_reactions:
+            # Dedup rules: two triggers for the same emoji cannot both be
+            # wildcard (no channels), nor can a specific channel be listed
+            # twice. We also reject wildcard + specific-channel for the same
+            # emoji — otherwise a message in the specific channel fires both
+            # the wildcard and the specific trigger, which is almost never
+            # what the operator wants.
+            if not channels_tuple:
+                if (emoji, "*") in seen_reactions:
+                    raise ValueError(f"reaction trigger :{emoji}: wildcard is defined twice")
+                for existing_emoji, existing_channel in seen_reactions:
+                    if existing_emoji == emoji and existing_channel != "*":
+                        raise ValueError(
+                            f"reaction trigger :{emoji}: is already defined for "
+                            f"channel {existing_channel!r}; a wildcard would "
+                            "double-fire in that channel"
+                        )
+                seen_reactions.add((emoji, "*"))
+            else:
+                if (emoji, "*") in seen_reactions:
                     raise ValueError(
-                        f"reaction trigger :{emoji}: in {channel_id} is defined twice"
+                        f"reaction trigger :{emoji}: is already defined as a "
+                        "wildcard; adding a specific channel would double-fire"
                     )
-                seen_reactions.add(key)
+                for channel_id in channels_tuple:
+                    key = (emoji, channel_id)
+                    if key in seen_reactions:
+                        raise ValueError(
+                            f"reaction trigger :{emoji}: in {channel_id} is defined twice"
+                        )
+                    seen_reactions.add(key)
             triggers.append(
                 TriggerDefinition(
                     name=name,
@@ -205,6 +229,14 @@ def render_prompt(
             return value
         return f'<trigger_value path="{path}">{_xml_escape(value)}</trigger_value>'
 
+    def _stringify(value: object) -> str:
+        """Render a substituted value. Nested dicts/lists go through JSON so a
+        caller reading the prompt sees real JSON, not Python repr like
+        `{'key': 'val'}`."""
+        if isinstance(value, (dict, list)):
+            return json.dumps(value, default=str, sort_keys=True)
+        return str(value)
+
     def replace(match: re.Match[str]) -> str:
         path = match.group(1)
         parts = path.split(".")
@@ -213,7 +245,7 @@ def render_prompt(
             return ""
         # For single-key lookups on scalar roots (e.g. {{reaction}})
         if len(parts) == 1:
-            value = str(root) if not isinstance(root, Mapping) else ""
+            value = _stringify(root) if not isinstance(root, Mapping) else ""
             return _wrap(path, value)
         cursor: object = root
         for segment in parts[1:]:
@@ -223,7 +255,7 @@ def render_prompt(
                 return ""
             if cursor is None:
                 return ""
-        return _wrap(path, str(cursor))
+        return _wrap(path, _stringify(cursor))
 
     return _TEMPLATE_PATTERN.sub(replace, template)
 

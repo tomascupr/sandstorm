@@ -20,11 +20,18 @@ from .store import run_store
 logger = logging.getLogger(__name__)
 
 
-def _status_block(tenant: str | None) -> dict:
-    """Top-of-home status: most-recent run metadata for the user's tenant."""
-    most_recent = run_store.find_most_recent(lambda r: r.team_id == tenant)
+def _status_block(tenant: str | None, user_id: str | None) -> dict:
+    """Top-of-home status: most-recent run metadata for the viewing user.
+
+    Scoped to `(tenant, user_id)` — the App Home is personal, and other
+    workspace members' prompts / models / costs must not leak through the
+    shared status header.
+    """
+    most_recent = run_store.find_most_recent(
+        lambda r: r.team_id == tenant and r.user_id == user_id
+    )
     if most_recent is None:
-        text = "*No Sandstorm runs yet in this workspace.*"
+        text = "*No Sandstorm runs yet.*"
     else:
         cost = f"${most_recent.cost_usd:.4f}" if most_recent.cost_usd is not None else "n/a"
         duration = (
@@ -124,10 +131,7 @@ def _active_run_blocks(tenant: str | None, user_id: str | None) -> list[dict]:
             "type": "section",
             "text": {
                 "type": "mrkdwn",
-                "text": (
-                    f"`{active.id}` — {active.prompt}"
-                    f"\n<{'https://sandstorm/' + active.id}|view dashboard>"
-                ),
+                "text": f"`{active.id}` — {active.prompt}",
             },
             "accessory": {
                 "type": "button",
@@ -189,7 +193,7 @@ def build_home_view(
                 },
             ],
         },
-        _status_block(team_id),
+        _status_block(team_id, user_id),
     ]
     blocks.extend(_active_run_blocks(team_id, user_id))
     blocks.extend(_channel_defaults_blocks(config))

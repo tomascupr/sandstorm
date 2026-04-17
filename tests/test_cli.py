@@ -832,6 +832,29 @@ class TestCli:
         )
         assert result.exit_code != 0
 
+    def test_add_custom_rejects_invalid_env_name(self, tmp_path, monkeypatch):
+        """--env MY_VAR ok; --env 'MY KEY' or 123BADNAME must error at CLI
+        time rather than silently land in sandstorm.json."""
+        monkeypatch.chdir(tmp_path)
+        _disable_dotenv(monkeypatch)
+        (tmp_path / "sandstorm.json").write_text('{"model":"sonnet"}', encoding="utf-8")
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "add",
+                "--custom",
+                "thing",
+                "--package",
+                "@foo/mcp",
+                "--env",
+                "MY KEY",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "MY KEY" in result.output
+
     def test_webhook_register_rejects_non_http_url(self, monkeypatch):
         monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
         _disable_dotenv(monkeypatch)
