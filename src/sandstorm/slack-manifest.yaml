@@ -44,6 +44,7 @@ oauth_config:
       - groups:history
       - im:history
       - files:read
+      - reactions:read
       - reactions:write
       - commands
 settings:
@@ -53,6 +54,7 @@ settings:
       - assistant_thread_started
       - assistant_thread_context_changed
       - message.im
+      - reaction_added
   interactivity:
     is_enabled: true
   socket_mode_enabled: true

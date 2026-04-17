@@ -948,6 +948,83 @@ def create_slack_app(
         _thread_model_overrides[key] = model
         await respond(text=f"Model override set for this channel: `{model}`")
 
+    # ── 5. Reaction-triggered runs ─────────────────────────────────────────────
+    # Users add an emoji to a message to fire an agent. Matched against
+    # reaction-type triggers in sandstorm.json. Runs land in the same thread
+    # as the reacted-to message so they share the paused sandbox.
+
+    @app.event("reaction_added")
+    async def handle_reaction(event, client, context):
+        emoji = event.get("reaction")
+        item = event.get("item") or {}
+        if item.get("type") != "message":
+            return
+        channel = item.get("channel")
+        ts = item.get("ts")
+        if not channel or not ts:
+            return
+
+        from .config import load_sandstorm_config
+        from .triggers import load_triggers, render_prompt
+
+        config = load_sandstorm_config()
+        if config is None:
+            return
+        try:
+            triggers = load_triggers(config)
+        except ValueError:
+            logger.exception("Failed to load triggers for reaction event")
+            return
+
+        matches = [
+            t
+            for t in triggers
+            if t.type == "reaction"
+            and t.emoji == emoji
+            and (not t.channels or channel in t.channels)
+        ]
+        if not matches:
+            return
+
+        try:
+            history = await client.conversations_history(
+                channel=channel, oldest=ts, inclusive=True, limit=1
+            )
+        except Exception:
+            logger.exception("Failed to fetch reacted-to message %s/%s", channel, ts)
+            return
+        messages = history.get("messages", []) if history else []
+        if not messages:
+            return
+        message = messages[0]
+
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = event.get("user", "unknown")
+
+        for trigger in matches:
+            rendered = render_prompt(
+                trigger.prompt,
+                message={"text": message.get("text", ""), "user": message.get("user", "")},
+                channel={"id": channel},
+                reaction=emoji,
+            )
+            run_id = uuid.uuid4().hex[:8]
+            request = _build_query_request(rendered, None, team_id=tenant, user_id=user_id)
+            thread_ts = message.get("thread_ts") or ts
+            try:
+                await _run_in_sandbox_pool(
+                    request=request,
+                    run_id=run_id,
+                    client=client,
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    context=context,
+                    user_id=user_id,
+                    binary_files={},
+                )
+            except Exception:
+                logger.exception("Reaction trigger %s failed for run %s", trigger.name, run_id)
+
     return app
 
 
