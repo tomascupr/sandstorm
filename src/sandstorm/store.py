@@ -22,6 +22,20 @@ class Run:
     files_count: int = 0
     feedback: str | None = None
     feedback_user: str | None = None
+    # Untruncated prompt — needed for `ds replay` (distinct from the 100-char display `prompt`)
+    raw_prompt: str = ""
+    # Captured from runner.mjs on completion — enables Agent SDK session resume
+    agent_session_id: str | None = None
+    # Captured at sandbox creation — enables E2B pause/resume across Slack messages
+    sandbox_id: str | None = None
+    # Slack thread context — nullable for CLI/HTTP runs
+    team_id: str | None = None
+    user_id: str | None = None
+    channel_id: str | None = None
+    thread_ts: str | None = None
+    # Snapshot of runtime config (model, allowed_tools, mcp_servers, files)
+    # so replays can reproduce the original run deterministically
+    config_snapshot: dict | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -43,6 +57,13 @@ class RunStore:
         prompt: str,
         model: str | None,
         files_count: int = 0,
+        raw_prompt: str | None = None,
+        sandbox_id: str | None = None,
+        team_id: str | None = None,
+        user_id: str | None = None,
+        channel_id: str | None = None,
+        thread_ts: str | None = None,
+        config_snapshot: dict | None = None,
     ) -> Run:
         run = Run(
             id=id,
@@ -51,6 +72,13 @@ class RunStore:
             status="running",
             started_at=datetime.now(UTC).isoformat(),
             files_count=files_count,
+            raw_prompt=raw_prompt if raw_prompt is not None else prompt,
+            sandbox_id=sandbox_id,
+            team_id=team_id,
+            user_id=user_id,
+            channel_id=channel_id,
+            thread_ts=thread_ts,
+            config_snapshot=config_snapshot,
         )
         # If deque is full, evict the oldest and remove from index
         if len(self._runs) == self._maxlen:
@@ -67,6 +95,8 @@ class RunStore:
         num_turns: int | None = None,
         duration_secs: float | None = None,
         model: str | None = None,
+        agent_session_id: str | None = None,
+        sandbox_id: str | None = None,
     ) -> None:
         run = self._index.get(id)
         if run is None:
@@ -78,6 +108,10 @@ class RunStore:
         run.duration_secs = duration_secs
         if model:
             run.model = model
+        if agent_session_id:
+            run.agent_session_id = agent_session_id
+        if sandbox_id:
+            run.sandbox_id = sandbox_id
         self._append_to_file(run)
 
     def fail(self, id: str, error: str, duration_secs: float | None = None) -> None:
