@@ -1,7 +1,7 @@
 # @duvo/sandstorm-client
 
 Thin TypeScript client for the [Sandstorm](https://github.com/tomascupr/sandstorm)
-agent runtime — stream agent runs over SSE, list prior runs, check health.
+agent runtime, stream agent runs over SSE, list prior runs, check health.
 Zero runtime dependencies (uses global `fetch`).
 
 ## Install
@@ -21,7 +21,7 @@ import { SandstormClient } from "@duvo/sandstorm-client";
 
 const client = new SandstormClient({
   baseUrl: "http://localhost:8000",
-  apiKey: process.env.SANDSTORM_API_KEY, // optional — only when server auth is on
+  apiKey: process.env.SANDSTORM_API_KEY, // optional, only when server auth is on
 });
 
 for await (const event of client.query({
@@ -61,7 +61,7 @@ Mirrors `GET /health`.
 
 ## Types
 
-All request and response types are re-exported from the entry point —
+All request and response types are re-exported from the entry point 
 `QueryRequest`, `Run`, `SSEEvent`, `HealthResponse`, `ClientOptions`.
 
 ## Examples

@@ -51,7 +51,7 @@ for each run.
 ## Phoenix / Arize
 
 [Phoenix](https://arize.com/docs/phoenix) is Arize's OSS agent tracing tool.
-Same pattern — Phoenix speaks OTLP:
+Same pattern. Phoenix speaks OTLP:
 
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006/v1/traces
@@ -76,9 +76,9 @@ SANDSTORM_TELEMETRY=1
 
 Each `/query` request produces one root span (`query`) with child spans for:
 
-- `sandbox.create` — E2B cold-start latency
-- `agent.execute` — runner.mjs lifetime, model, has_skills
-- `webhook.e2b` — incoming E2B lifecycle events
+- `sandbox.create`: E2B cold-start latency
+- `agent.execute`: runner.mjs lifetime, model, has_skills
+- `webhook.e2b`: incoming E2B lifecycle events
 
 Counters exported alongside:
 

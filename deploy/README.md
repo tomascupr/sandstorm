@@ -15,7 +15,7 @@ Required env vars (set in Railway's project settings):
 | ----------------------- | ------------------------------ |
 | `ANTHROPIC_API_KEY`     | any provider path               |
 | `E2B_API_KEY`           | sandbox execution               |
-| `SANDSTORM_API_KEY`     | recommended — enables `/query` auth |
+| `SANDSTORM_API_KEY`     | recommended, enables `/query` auth |
 | `SLACK_BOT_TOKEN`       | Slack integration               |
 | `SLACK_SIGNING_SECRET`  | Slack HTTP mode                 |
 | `SLACK_APP_TOKEN`       | Slack Socket Mode (dev)         |
