@@ -107,12 +107,12 @@ class MemoryStore:
     def _append_to_file(self, memory: Memory) -> None:
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            new_file = not self._path.exists()
             with self._path.open("a") as f:
                 f.write(json.dumps(memory.to_dict()) + "\n")
-            if new_file:
-                with contextlib.suppress(OSError):
-                    os.chmod(self._path, _PRIVATE_FILE_MODE)
+            # chmod is idempotent and cheap; applying every write avoids a
+            # TOCTOU window between file creation and the permissions fix.
+            with contextlib.suppress(OSError):
+                os.chmod(self._path, _PRIVATE_FILE_MODE)
         except OSError:
             logger.warning("MemoryStore: failed to write to %s", self._path, exc_info=True)
 
@@ -131,6 +131,11 @@ class MemoryStore:
                         # Tombstone records overwrite the live copy (last-write-wins)
                         if memory.id in self._index:
                             self._index[memory.id].deleted = memory.deleted
+                            continue
+                        # A tombstone for an id that has been evicted from the
+                        # deque must not re-enter storage; it would burn a slot
+                        # and surface as a "deleted" entry in list() callers.
+                        if memory.deleted:
                             continue
                         self._memories.append(memory)
                         self._index[memory.id] = memory

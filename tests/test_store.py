@@ -197,6 +197,39 @@ class TestJsonlPersistence:
         assert r["team_id"] is None
         assert r["config_snapshot"] is None
 
+    def test_compacts_jsonl_beyond_10x_maxlen(self, tmp_path):
+        """Each status transition appends a line, so long-running deployments
+        accumulate stale records. On load, when the file grows past 10x the
+        deque cap, the store rewrites it to the live in-deque set."""
+        path = tmp_path / "runs.jsonl"
+        # Directly stuff the JSONL with 60 lines of plausible data. The store
+        # has maxlen=5, so anything beyond 5 will be evicted in memory — and
+        # the file should be compacted on next load because 60 > 5 * 10.
+        import json as _json
+
+        with path.open("w") as f:
+            for i in range(60):
+                f.write(
+                    _json.dumps(
+                        {
+                            "id": f"r{i}",
+                            "prompt": "p",
+                            "model": None,
+                            "status": "completed",
+                            "started_at": "2026-04-17T00:00:00+00:00",
+                        }
+                    )
+                    + "\n"
+                )
+
+        store = RunStore(path=path, maxlen=5)
+        # File must now hold exactly the live 5 entries
+        lines = path.read_text().splitlines()
+        assert len(lines) == 5
+        loaded_ids = [r["id"] for r in store.list()]
+        # Newest-first, so r59..r55 (deque kept the last 5)
+        assert loaded_ids[0] == "r59"
+
     def test_new_fields_persist_on_create_and_complete(self, tmp_path):
         path = tmp_path / "runs.jsonl"
         store = RunStore(path=path)

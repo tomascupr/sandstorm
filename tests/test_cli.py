@@ -70,6 +70,24 @@ class TestCli:
         assert result.exit_code == 1
         assert "image.bin is not a text file" in result.output
 
+    def test_query_rejects_files_exceeding_size_cap(self, tmp_path, monkeypatch):
+        """Regression: the CLI used to read_text() any size, letting a huge
+        file OOM the process before QueryRequest's 10MB/file validator fired.
+        Now the per-file cap is enforced upstream with a friendly error."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        big = tmp_path / "huge.txt"
+        # 11 MB of newline-terminated ascii — just above the 10 MB cap
+        big.write_text("a\n" * (11 * 1024 * 1024 // 2))
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["query", "summarise", "-f", str(big)])
+
+        assert result.exit_code == 1
+        assert "huge.txt" in result.output
+        assert "max" in result.output
+
     def test_query_uses_relative_paths_for_uploaded_files(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
         monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")

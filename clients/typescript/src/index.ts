@@ -70,6 +70,11 @@ export class SandstormClient {
   }
 
   async listRuns(limit = 50): Promise<Run[]> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new Error(
+        `listRuns: limit must be an integer between 1 and 1000 (got ${limit})`,
+      );
+    }
     const resp = await this.fetchImpl(
       `${this.baseUrl}/runs?limit=${encodeURIComponent(limit)}`,
       {

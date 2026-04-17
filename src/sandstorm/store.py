@@ -66,6 +66,38 @@ class RunStore:
         self._runs: deque[Run] = deque(maxlen=maxlen)
         self._index: dict[str, Run] = {}
         self._load_from_file()
+        self._maybe_compact_on_load()
+
+    def _maybe_compact_on_load(self) -> None:
+        """Rewrite the JSONL to the live in-deque set when it has grown past
+        10x the in-memory cap. Every status transition appends a new line, so
+        a long-running deployment accumulates stale records for runs that have
+        already fallen out of the deque. Bounds the file without changing
+        semantics or visible history in `list()`.
+        """
+        if not self._path.exists():
+            return
+        try:
+            with self._path.open("rb") as f:
+                line_count = sum(1 for _ in f)
+        except OSError:
+            return
+        if line_count <= self._maxlen * 10:
+            return
+        try:
+            tmp = self._path.with_suffix(self._path.suffix + ".compact")
+            with tmp.open("w") as f:
+                for run in self._runs:
+                    f.write(json.dumps(run.to_dict()) + "\n")
+            tmp.replace(self._path)
+            logger.info(
+                "RunStore: compacted %s (%d lines -> %d)",
+                self._path,
+                line_count,
+                len(self._runs),
+            )
+        except OSError:
+            logger.warning("RunStore: compact failed", exc_info=True)
 
     def create(
         self,

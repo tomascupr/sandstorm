@@ -618,14 +618,14 @@ def create_slack_app(
         set_status: Callable | None = None,
     ) -> dict:
         """Run agent with sandbox reuse, pool management, and eviction."""
-        team_id = context.get("team_id") or ""
-        key = (team_id, channel, thread_ts)
+        tenant = context.get("enterprise_id") or context.get("team_id") or ""
+        key = (tenant, channel, thread_ts)
         if key not in _sandbox_pool:
             # Cold start (or server restart). Look up the prior Run for this
             # thread and resume its paused sandbox if it still exists; E2B's
             # connect() auto-resumes. On failure the generic reuse-error path
             # handles the fallback.
-            prior = run_store.find_thread_session(team_id, channel, thread_ts)
+            prior = run_store.find_thread_session(tenant, channel, thread_ts)
             initial_id = prior.sandbox_id if prior else None
             _sandbox_pool[key] = (initial_id, asyncio.Lock())
         _, lock = _sandbox_pool[key]
@@ -729,13 +729,14 @@ def create_slack_app(
             await client.reactions_add(channel=channel, timestamp=event["ts"], name="eyes")
 
         run_id = uuid.uuid4().hex[:8]
+        tenant = context.get("enterprise_id") or context.get("team_id")
         request, binary_files = await _prepare_prompt(
             client,
             channel,
             thread_ts,
             bot_user_id,
             prompt,
-            team_id=context.get("team_id"),
+            team_id=tenant,
             user_id=user_id,
         )
         await _run_in_sandbox_pool(
@@ -793,13 +794,14 @@ def create_slack_app(
 
         await set_status("Spinning up sandbox...")
         run_id = uuid.uuid4().hex[:8]
+        tenant = context.get("enterprise_id") or context.get("team_id")
         request, binary_files = await _prepare_prompt(
             client,
             channel_id,
             thread_ts,
             bot_user_id,
             prompt,
-            team_id=context.get("team_id"),
+            team_id=tenant,
             user_id=user_id,
         )
         await _run_in_sandbox_pool(
@@ -869,7 +871,12 @@ def create_slack_app(
     # bot scope for these to appear in the workspace — see slack-manifest.yaml.
 
     def _command_scope(command) -> tuple[str | None, str | None]:
-        return command.get("team_id"), command.get("user_id")
+        # On Enterprise Grid, the bot is installed on the enterprise and the
+        # sub-workspace team_id rotates per channel. Prefer enterprise_id so
+        # memories stay scoped to the whole tenant; fall back to team_id for
+        # single-workspace installs where enterprise_id is absent.
+        tenant = command.get("enterprise_id") or command.get("team_id")
+        return tenant, command.get("user_id")
 
     @app.command("/remember")
     async def handle_remember(ack, command, respond):
@@ -916,13 +923,13 @@ def create_slack_app(
     async def handle_model(ack, command, respond):
         await ack()
         # Slash commands do not carry thread_ts, so /model scopes to
-        # (team, channel, user) instead of per-thread. The override then
+        # (tenant, channel, user) instead of per-thread. The override then
         # applies to that user's next @mention or DM in this channel.
         model = (command.get("text") or "").strip()
-        team_id = command.get("team_id") or ""
+        tenant = command.get("enterprise_id") or command.get("team_id") or ""
         channel = command.get("channel_id") or ""
         user_id = command.get("user_id") or ""
-        key = (team_id, channel, f"user:{user_id}")
+        key = (tenant, channel, f"user:{user_id}")
         if not model:
             current = _thread_model_overrides.get(key)
             await respond(

@@ -184,13 +184,23 @@ def _probe_anthropic(key: str) -> tuple[bool, str]:
 
 
 async def _probe_e2b(api_key: str) -> tuple[bool, str]:
-    """Validate the API key without spinning up compute."""
+    """Validate the API key without spinning up compute.
+
+    `AsyncSandbox.list` has varied across e2b 1.x / 2.x between returning a
+    paginator and an awaitable. We accept either shape and surface an error
+    if neither can be consumed, so an auth failure is always caught rather
+    than hidden by an unexpected return type.
+    """
+    import inspect
+
     from e2b import AsyncSandbox, AuthenticationException
 
     try:
-        sandboxes = AsyncSandbox.list(api_key=api_key)
-        if hasattr(sandboxes, "next_items"):
-            await sandboxes.next_items()
+        result = AsyncSandbox.list(api_key=api_key)
+        if inspect.isawaitable(result):
+            result = await result
+        if hasattr(result, "next_items"):
+            await result.next_items()
         return True, "OK"
     except AuthenticationException:
         return False, "invalid API key (401)"

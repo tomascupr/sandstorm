@@ -734,12 +734,33 @@ def query(
     if file_paths:
         files = {}
         cwd = Path.cwd()
+        # Match QueryRequest.validate_file_paths: 10 MB per file and 20 files
+        # total. Guarding here avoids a p.read_text() OOM on huge files before
+        # Pydantic's validator would reject the request.
+        _CLI_MAX_FILE_BYTES = 10 * 1024 * 1024
+        _CLI_MAX_FILE_COUNT = 20
+        if len(file_paths) > _CLI_MAX_FILE_COUNT:
+            click.echo(
+                f"Error: too many files ({len(file_paths)}, max {_CLI_MAX_FILE_COUNT})",
+                err=True,
+            )
+            raise SystemExit(1)
         for fp in file_paths:
             p = Path(fp)
             try:
+                size = p.stat().st_size
+            except OSError as exc:
+                click.echo(f"Error: cannot stat {p}: {exc}", err=True)
+                raise SystemExit(1) from exc
+            if size > _CLI_MAX_FILE_BYTES:
+                click.echo(
+                    f"Error: {p.name} is {size:,} bytes (max {_CLI_MAX_FILE_BYTES:,})",
+                    err=True,
+                )
+                raise SystemExit(1)
+            try:
                 rel_path = p.relative_to(cwd)
             except ValueError:
-                # File is outside CWD — use basename only
                 rel_path = Path(p.name)
             key = str(rel_path)
             try:

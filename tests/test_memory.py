@@ -145,6 +145,27 @@ class TestDequeEviction:
         assert "m1" not in memories
         assert memories == ["m2", "m3", "m4"]
 
+    def test_tombstone_for_evicted_entry_does_not_reenter(self, tmp_path):
+        """Regression: a tombstone written for a memory that was later evicted
+        from the deque must not re-enter storage on reload. Before the fix
+        the tombstone-record path appended the deleted record to the deque,
+        consuming a slot with a dead entry."""
+        path = tmp_path / "m.jsonl"
+        s1 = MemoryStore(path=path, maxlen=3)
+        # Create then delete the first entry (writes a tombstone line)
+        s1.remember("T1", "U1", "delete-me")
+        s1.forget("T1", "U1", "delete-me")
+        # Push enough new entries to evict the tombstone's id from the deque
+        for i in range(5):
+            s1.remember("T1", "U1", f"live-{i}")
+
+        s2 = MemoryStore(path=path, maxlen=3)
+        live = [m.text for m in s2.list("T1", "U1")]
+        # All three slots hold real live entries; tombstone did not sneak in
+        assert len(s2._memories) == 3
+        assert "delete-me" not in live
+        assert all(t.startswith("live-") for t in live)
+
 
 @pytest.fixture()
 def _api_keys(monkeypatch):
