@@ -8,6 +8,10 @@ features:
   bot_user:
     display_name: Sandstorm
     always_online: true
+  app_home:
+    home_tab_enabled: true
+    messages_tab_enabled: false
+    messages_tab_read_only_enabled: false
   assistant_view:
     assistant_description: "General-purpose AI agent powered by Claude — runs tasks in isolated sandboxes"
     suggested_prompts:
@@ -57,6 +61,7 @@ oauth_config:
       - files:read
       - reactions:read
       - reactions:write
+      - users:read
       - commands
 settings:
   event_subscriptions:
@@ -66,6 +71,7 @@ settings:
       - assistant_thread_context_changed
       - message.im
       - reaction_added
+      - app_home_opened
   interactivity:
     is_enabled: true
   socket_mode_enabled: true

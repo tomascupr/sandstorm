@@ -1049,6 +1049,47 @@ def create_slack_app(
                 text=f"Run `{run.id}` has no active cancellation event (already finishing)."
             )
 
+    # ── 4.5 App Home tab ──────────────────────────────────────────────────────
+
+    @app.event("app_home_opened")
+    async def handle_app_home_opened(event, client, context):
+        from .app_home import publish_home_view
+
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        await publish_home_view(client, user_id=event.get("user", ""), team_id=tenant)
+
+    @app.action("sandstorm_forget_memory")
+    async def handle_forget_memory_action(ack, body, client, context):
+        await ack()
+        from .app_home import publish_home_view
+
+        memory_id = body.get("actions", [{}])[0].get("value") or ""
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = (body.get("user") or {}).get("id") or ""
+        if memory_id:
+            # `forget` takes a substring match; resolve the memory by id first
+            # so we can tombstone exactly one record.
+            store = memory_store
+            for m in list(store._memories):
+                if m.id == memory_id and not m.deleted:
+                    m.deleted = True
+                    store._append_to_file(m)
+                    break
+        await publish_home_view(client, user_id=user_id, team_id=tenant)
+
+    @app.action("sandstorm_cancel_run")
+    async def handle_cancel_run_action(ack, body, client, context):
+        await ack()
+        from .app_home import publish_home_view
+        from .cancellation import request_cancellation
+
+        run_id = body.get("actions", [{}])[0].get("value") or ""
+        tenant = context.get("enterprise_id") or context.get("team_id")
+        user_id = (body.get("user") or {}).get("id") or ""
+        if run_id:
+            request_cancellation(run_id)
+        await publish_home_view(client, user_id=user_id, team_id=tenant)
+
     # ── 5. Reaction-triggered runs ─────────────────────────────────────────────
     # Users add an emoji to a message to fire an agent. Matched against
     # reaction-type triggers in sandstorm.json. Runs land in the same thread
