@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
 
-from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, telemetry
+from . import _LOG_DATEFMT, _LOG_FORMAT, __version__, cancellation, telemetry
 from .auth import load_api_keys, verify_api_token
 from .config import load_project_dotenv as load_dotenv
 from .config import load_sandstorm_config
@@ -383,6 +383,7 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                 }
             ),
         )
+        cancellation.register_run(req_id)
         cost_usd = None
         num_turns = None
         model = request.model
@@ -439,5 +440,30 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                 )
             finally:
                 record_request_duration(time.monotonic() - start, model=request.model)
+                cancellation.unregister_run(req_id)
 
     return EventSourceResponse(event_generator(), ping=30)
+
+
+@app.post(
+    "/runs/{run_id}/cancel",
+    summary="Cancel an in-flight run",
+    description=(
+        "Signal cancellation to a running agent. Returns 404 when the run_id"
+        " is unknown, 409 when the run has already completed."
+    ),
+)
+async def cancel_run(run_id: str, token: str = Depends(verify_api_token)):
+    run = run_store.get(run_id)
+    if run is None:
+        return JSONResponse({"error": "unknown run_id"}, status_code=404)
+    if run.status != "running":
+        return JSONResponse(
+            {"error": f"run status is {run.status}, cannot cancel"}, status_code=409
+        )
+    if cancellation.request_cancellation(run_id):
+        return {"status": "cancelling", "run_id": run_id}
+    # Run has a "running" status in the store but no active event: fail the
+    # record so the operator isn't stuck with a zombie.
+    run_store.fail(run_id, "cancelled (stale registration)")
+    return JSONResponse({"error": "run had no active cancellation event"}, status_code=409)

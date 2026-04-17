@@ -33,6 +33,9 @@ features:
       description: Override the model used for this thread (ephemeral until restart)
       usage_hint: "claude-haiku-4-5-20251001 | clear"
       should_escape: false
+    - command: /cancel
+      description: Cancel the most recent in-flight run in this channel
+      should_escape: false
 oauth_config:
   scopes:
     bot:

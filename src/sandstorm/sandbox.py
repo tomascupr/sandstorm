@@ -14,6 +14,7 @@ from pathlib import Path
 
 from e2b import AsyncSandbox, NotFoundException
 
+from .cancellation import is_cancelled
 from .config import _PROVIDER_ENV_KEYS, _build_agent_config, load_sandstorm_config
 from .files import (
     _create_extraction_marker,
@@ -386,7 +387,9 @@ async def run_agent_in_sandbox(
         ):
             task = asyncio.create_task(run_command())
 
-            # Yield messages from queue until the process ends
+            # Yield messages from queue until the process ends or the run
+            # is cancelled. is_cancelled() is an O(1) dict check; cancellation
+            # breaks the loop and the finally block tears the sandbox down.
             while True:
                 line = await queue.get()
                 if line is None:
@@ -394,6 +397,10 @@ async def run_agent_in_sandbox(
                 line = line.strip()
                 if line:
                     yield line
+                if is_cancelled(request_id):
+                    logger.info("[%s] Cancellation received — stopping stream", request_id)
+                    yield json.dumps({"type": "error", "error": "cancelled by user"})
+                    break
 
             record_agent_execution(
                 time.monotonic() - agent_start,

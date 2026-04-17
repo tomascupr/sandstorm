@@ -1125,6 +1125,43 @@ def replay(
         click.echo("\n" + report, err=True)
 
 
+@cli.command()
+@click.argument("run_id")
+@click.option(
+    "--server",
+    default="http://localhost:8000",
+    show_default=True,
+    help="Sandstorm server URL.",
+)
+@click.option(
+    "--api-key",
+    default=None,
+    help="Sandstorm API token [env: SANDSTORM_API_KEY].",
+)
+def cancel(run_id: str, server: str, api_key: str | None) -> None:
+    """Cancel an in-flight run by id.
+
+    Posts to `<server>/runs/<run_id>/cancel`. Returns non-zero when the run
+    id is unknown (404) or already finished (409).
+    """
+    load_dotenv()
+    token = api_key or os.environ.get("SANDSTORM_API_KEY", "")
+    url = server.rstrip("/") + f"/runs/{run_id}/cancel"
+    req = urllib.request.Request(url, method="POST", data=b"")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            click.echo(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace") if exc.fp else ""
+        click.echo(f"Error: HTTP {exc.code}: {detail}", err=True)
+        raise SystemExit(1) from exc
+    except urllib.error.URLError as exc:
+        click.echo(f"Error: {exc.reason}", err=True)
+        raise SystemExit(1) from exc
+
+
 def _format_replay_report(
     *,
     original,

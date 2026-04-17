@@ -958,6 +958,29 @@ def create_slack_app(
         _thread_model_overrides[key] = model
         await respond(text=f"Model override set for this channel: `{model}`")
 
+    @app.command("/cancel")
+    async def handle_cancel(ack, command, respond):
+        await ack()
+        from .cancellation import request_cancellation
+
+        tenant = command.get("enterprise_id") or command.get("team_id")
+        channel = command.get("channel_id") or ""
+        # Slash commands don't carry thread_ts, so we look up the most recent
+        # in-flight run in this channel regardless of thread. This matches
+        # the UX expectation: "cancel whatever I just started in this channel."
+        run = run_store.find_most_recent(
+            lambda r: r.team_id == tenant and r.channel_id == channel and r.status == "running"
+        )
+        if run is None:
+            await respond(text="No in-flight run to cancel in this channel.")
+            return
+        if request_cancellation(run.id):
+            await respond(text=f"Cancelled run `{run.id}`.")
+        else:
+            await respond(
+                text=f"Run `{run.id}` has no active cancellation event (already finishing)."
+            )
+
     # ── 5. Reaction-triggered runs ─────────────────────────────────────────────
     # Users add an emoji to a message to fire an agent. Matched against
     # reaction-type triggers in sandstorm.json. Runs land in the same thread
