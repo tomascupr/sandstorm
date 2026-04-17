@@ -78,6 +78,18 @@ STARTERS: tuple[StarterDefinition, ...] = (
             "-f /path/to/requirements.txt -f /path/to/src/auth.py"
         ),
     ),
+    StarterDefinition(
+        slug="code-review",
+        title="Code Review",
+        description=(
+            "Review GitHub pull requests — pulls the diff, checks tests, posts inline"
+            " comments with GitHub MCP."
+        ),
+        next_step_command=(
+            'ds "Review PR 123 in owner/repo — focus on security and API breakage"'
+        ),
+        aliases=("pr-review",),
+    ),
 )
 
 _STARTER_BY_SLUG = {starter.slug: starter for starter in STARTERS}
