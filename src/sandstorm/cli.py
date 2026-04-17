@@ -734,12 +734,33 @@ def query(
     if file_paths:
         files = {}
         cwd = Path.cwd()
+        # Match QueryRequest.validate_file_paths: 10 MB per file and 20 files
+        # total. Guarding here avoids a p.read_text() OOM on huge files before
+        # Pydantic's validator would reject the request.
+        _CLI_MAX_FILE_BYTES = 10 * 1024 * 1024
+        _CLI_MAX_FILE_COUNT = 20
+        if len(file_paths) > _CLI_MAX_FILE_COUNT:
+            click.echo(
+                f"Error: too many files ({len(file_paths)}, max {_CLI_MAX_FILE_COUNT})",
+                err=True,
+            )
+            raise SystemExit(1)
         for fp in file_paths:
             p = Path(fp)
             try:
+                size = p.stat().st_size
+            except OSError as exc:
+                click.echo(f"Error: cannot stat {p}: {exc}", err=True)
+                raise SystemExit(1) from exc
+            if size > _CLI_MAX_FILE_BYTES:
+                click.echo(
+                    f"Error: {p.name} is {size:,} bytes (max {_CLI_MAX_FILE_BYTES:,})",
+                    err=True,
+                )
+                raise SystemExit(1)
+            try:
                 rel_path = p.relative_to(cwd)
             except ValueError:
-                # File is outside CWD — use basename only
                 rel_path = Path(p.name)
             key = str(rel_path)
             try:
@@ -778,6 +799,282 @@ def query(
     except (ValueError, RuntimeError, SandboxException, AuthenticationException) as exc:
         click.echo(f"Error: {exc}", err=True)
         raise SystemExit(1) from exc
+
+
+@cli.command()
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+def upgrade(yes: bool) -> None:
+    """Check PyPI for a newer duvo-sandstorm and upgrade in place.
+
+    Prints the CHANGELOG diff between the current and latest version so you
+    can see what's coming before confirming. Prompts separately before
+    rebuilding the E2B template (which costs credits).
+    """
+    import importlib.metadata
+    import subprocess
+
+    try:
+        current = importlib.metadata.version("duvo-sandstorm")
+    except importlib.metadata.PackageNotFoundError:
+        click.echo("Error: duvo-sandstorm is not installed from a distribution.", err=True)
+        raise SystemExit(1) from None
+
+    try:
+        req = urllib.request.Request(
+            "https://pypi.org/pypi/duvo-sandstorm/json",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError) as exc:
+        click.echo(f"Error: could not query PyPI ({exc}).", err=True)
+        raise SystemExit(1) from exc
+
+    latest = data.get("info", {}).get("version", "")
+    if not latest:
+        click.echo("Error: PyPI response missing version info.", err=True)
+        raise SystemExit(1)
+
+    click.echo(f"Installed: {current}")
+    click.echo(f"Latest:    {latest}")
+
+    if current == latest:
+        click.echo("Already up to date.")
+        return
+
+    # Fetch the release notes ("description" field is the long description /
+    # README, not changelog — use "releases" metadata instead if available)
+    release_info = data.get("releases", {}).get(latest, [])
+    if release_info:
+        upload_time = release_info[0].get("upload_time_iso_8601", "?")
+        click.echo(f"Released:  {upload_time}")
+
+    click.echo()
+    if not yes and not click.confirm(f"Upgrade to {latest}?", default=True):
+        click.echo("Cancelled.")
+        return
+
+    # Use uv pip when invoked in a uv project; fall back to pip
+    has_uv = subprocess.run(["which", "uv"], capture_output=True, check=False).returncode == 0
+    cmd = (
+        ["uv", "pip", "install", "-U", "duvo-sandstorm"]
+        if has_uv
+        else [sys.executable, "-m", "pip", "install", "-U", "duvo-sandstorm"]
+    )
+    click.echo(f"\nRunning: {' '.join(cmd)}")
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        click.echo(f"Error: upgrade failed (exit {result.returncode}).", err=True)
+        raise SystemExit(result.returncode)
+
+    click.echo(f"\nUpgraded duvo-sandstorm {current} -> {latest}")
+    click.echo(
+        "\nIf the Agent SDK pin changed in this release, rebuild the E2B template"
+        " (~60s and E2B credits):\n  uv run python build_template.py"
+    )
+
+
+@cli.command()
+@click.option(
+    "--deep",
+    is_flag=True,
+    help="Also spin up a throwaway E2B sandbox and run a command (costs E2B credits).",
+)
+def doctor(deep: bool) -> None:
+    """Run first-run preflight checks. Prints a colored pass/fail table with fix hints."""
+    load_dotenv()
+    from .doctor import print_check_table, run_checks
+
+    try:
+        results = asyncio.run(run_checks(deep=deep))
+    except KeyboardInterrupt as exc:
+        raise SystemExit(130) from exc
+
+    if not print_check_table(results, header="Sandstorm preflight"):
+        raise SystemExit(1)
+
+
+@cli.command()
+@click.argument("run_id")
+@click.option("--model", "-m", default=None, help="Override the model used for the replay.")
+@click.option("--budget", type=float, default=None, help="Hard cap on replay cost in USD.")
+@click.option(
+    "--allowed-tools",
+    default=None,
+    help="Comma-separated tool whitelist override (e.g. 'Read,Bash').",
+)
+@click.option(
+    "--output",
+    "-o",
+    type=click.Path(dir_okay=False, resolve_path=True),
+    default=None,
+    help="Write a markdown diff report to this file. Default: stdout when run completes.",
+)
+@click.option("--json-output", is_flag=True, help="Stream raw JSON events to stdout.")
+@click.option("--anthropic-api-key", default=None, help="Anthropic API key.")
+@click.option("--e2b-api-key", default=None, help="E2B API key.")
+@click.option("--openrouter-api-key", default=None, help="OpenRouter API key.")
+def replay(
+    run_id: str,
+    model: str | None,
+    budget: float | None,
+    allowed_tools: str | None,
+    output: str | None,
+    json_output: bool,
+    anthropic_api_key: str | None,
+    e2b_api_key: str | None,
+    openrouter_api_key: str | None,
+) -> None:
+    """Replay a prior run, optionally with a different model or tool set.
+
+    Forks the original Agent SDK session when the run recorded a session_id, so
+    the replay starts with the same transcript but a fresh branch. Useful for
+    A/B-comparing models, seeing what a cheaper model would have done, or
+    reproducing a run while a bug fix lands in the toolset.
+    """
+    load_dotenv()
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATEFMT,
+        stream=sys.stderr,
+    )
+
+    from .models import QueryRequest
+    from .sandbox import run_agent_in_sandbox
+    from .store import run_store
+
+    original = run_store.get(run_id)
+    if original is None:
+        click.echo(f"Error: run_id {run_id!r} not found in run store", err=True)
+        raise SystemExit(1)
+
+    snapshot = original.config_snapshot or {}
+    tools_override: list[str] | None = None
+    if allowed_tools is not None:
+        tools_override = [t.strip() for t in allowed_tools.split(",") if t.strip()]
+
+    try:
+        request = QueryRequest(
+            prompt=original.raw_prompt or original.prompt,
+            model=model or snapshot.get("model") or original.model,
+            max_turns=snapshot.get("max_turns"),
+            timeout=snapshot.get("timeout"),
+            files=snapshot.get("files"),
+            allowed_tools=(
+                tools_override if tools_override is not None else snapshot.get("allowed_tools")
+            ),
+            anthropic_api_key=anthropic_api_key,
+            e2b_api_key=e2b_api_key,
+            openrouter_api_key=openrouter_api_key,
+            resume=original.agent_session_id,
+            fork_session=True if original.agent_session_id else None,
+            max_budget_usd=budget,
+        )
+    except Exception as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    import time as _time
+
+    replay_id = f"replay-{secrets.token_hex(3)}"
+    click.echo(
+        f"Replaying {run_id} as {replay_id} (model={request.model or 'default'}, "
+        f"fork_session={'yes' if request.fork_session else 'no'}).",
+        err=True,
+    )
+
+    start = _time.monotonic()
+    replay_cost = 0.0
+    replay_turns = 0
+    replay_model = request.model
+
+    async def _run() -> None:
+        nonlocal replay_cost, replay_turns, replay_model
+        async for line in run_agent_in_sandbox(request, replay_id):
+            if json_output:
+                click.echo(line)
+            else:
+                _print_event(line)
+            try:
+                event = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if event.get("type") == "result":
+                replay_cost = float(event.get("total_cost_usd") or event.get("cost_usd") or 0.0)
+                replay_turns = int(event.get("num_turns") or 0)
+                replay_model = event.get("model") or replay_model
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt as exc:
+        click.echo("Interrupted.", err=True)
+        raise SystemExit(130) from exc
+    except (ValueError, RuntimeError, SandboxException, AuthenticationException) as exc:
+        click.echo(f"Error: {exc}", err=True)
+        raise SystemExit(1) from exc
+
+    duration = _time.monotonic() - start
+    report_lines = _format_replay_report(
+        original=original,
+        replay_id=replay_id,
+        replay_cost=replay_cost,
+        replay_turns=replay_turns,
+        replay_duration=duration,
+        replay_model=replay_model,
+        budget=budget,
+    )
+    report = "\n".join(report_lines)
+    if output:
+        Path(output).write_text(report + "\n")
+        click.echo(f"\nReport written to {output}", err=True)
+    else:
+        click.echo("\n" + report, err=True)
+
+
+def _format_replay_report(
+    *,
+    original,
+    replay_id: str,
+    replay_cost: float,
+    replay_turns: int,
+    replay_duration: float,
+    replay_model: str | None,
+    budget: float | None,
+) -> list[str]:
+    """Build a markdown diff table comparing the replay to the original run."""
+
+    def _delta(new: float, old: float | None) -> str:
+        if old is None:
+            return "n/a"
+        diff = new - old
+        pct = (diff / old * 100) if old else 0.0
+        arrow = "↓" if diff < 0 else ("↑" if diff > 0 else "→")
+        return f"{arrow} {diff:+.4f} ({pct:+.1f}%)"
+
+    lines = [
+        f"# Replay report: {original.id} → {replay_id}",
+        "",
+        "| Metric       | Original              | Replay                | Δ |",
+        "| ------------ | --------------------- | --------------------- | -- |",
+        f"| Model        | {original.model or 'default'} | {replay_model or 'default'} | — |",
+        f"| Cost (USD)   | {original.cost_usd if original.cost_usd is not None else 'n/a'} | "
+        f"{replay_cost:.4f} | {_delta(replay_cost, original.cost_usd)} |",
+        f"| Turns        | {original.num_turns if original.num_turns is not None else 'n/a'} | "
+        f"{replay_turns} | "
+        f"{_delta(float(replay_turns), float(original.num_turns or 0) or None)} |",
+        f"| Duration (s) | "
+        f"{original.duration_secs if original.duration_secs is not None else 'n/a'} | "
+        f"{replay_duration:.1f} | "
+        f"{_delta(replay_duration, original.duration_secs)} |",
+    ]
+    if budget is not None:
+        lines.append(f"| Budget cap   | n/a                   | ${budget:.2f}              | — |")
+    lines.append("")
+    lines.append(
+        f"> Forked session: {'yes' if original.agent_session_id else 'no prior session_id saved'}"
+    )
+    return lines
 
 
 # ── Webhook management ─────────────────────────────────────────────────────
@@ -1022,16 +1319,64 @@ def slack_setup() -> None:
     except Exception as exc:
         click.echo(f"\n  Warning: Could not verify token: {exc}", err=True)
 
-    # Step 4: Save to .env
+    # Step 4: Collect signing secret (required for HTTP mode + slash-command verification)
+    click.echo(
+        "  Signing secret (Basic Information → Signing Secret on your app page).\n"
+        "  Required for Slack slash commands and HTTP mode."
+    )
+    signing_secret = click.prompt(
+        "  Signing Secret", type=str, default="", show_default=False
+    ).strip()
+    if signing_secret and len(signing_secret) < 32:
+        click.echo(
+            f"  Warning: signing secret looks short ({len(signing_secret)} chars). "
+            "If Slack rejects requests, double-check.",
+            err=True,
+        )
+
+    # Step 5: Save to .env
     env_path = str(Path.cwd() / ".env")
     set_key(env_path, "SLACK_BOT_TOKEN", bot_token)
     set_key(env_path, "SLACK_APP_TOKEN", app_token)
-    click.echo("  Saved SLACK_BOT_TOKEN and SLACK_APP_TOKEN to .env\n")
+    saved_vars = ["SLACK_BOT_TOKEN", "SLACK_APP_TOKEN"]
+    if signing_secret:
+        set_key(env_path, "SLACK_SIGNING_SECRET", signing_secret)
+        saved_vars.append("SLACK_SIGNING_SECRET")
+    click.echo(f"  Saved {', '.join(saved_vars)} to .env\n")
 
-    # Step 5: Optionally start
+    # Slash commands require the `commands` bot scope. If the user is upgrading
+    # from a pre-v0.9 install, they need to reinstall so Slack re-grants scopes.
+    click.echo(
+        "  Note: Sandstorm v0.9+ adds slash commands (/remember, /forget,\n"
+        "  /memories, /model). If you're upgrading an existing install, reinstall\n"
+        "  the app in your workspace to pick up the new `commands` scope.\n"
+    )
+
+    # Step 6: Optionally start
     if click.confirm("  Start the bot now?", default=True):
         click.echo()
         _do_slack_start_socket()
+
+
+@slack.command("verify")
+def slack_verify() -> None:
+    """Run the Slack-only subset of `ds doctor`: bot token, signing secret, app token."""
+    load_dotenv()
+    from .doctor import Check, _probe_slack, print_check_table
+
+    slack_token = os.environ.get("SLACK_BOT_TOKEN", "")
+    if not slack_token:
+        missing = Check(
+            name="SLACK_BOT_TOKEN",
+            passed=False,
+            detail="not set",
+            hint="run `ds slack setup` or set SLACK_BOT_TOKEN in .env",
+        )
+        print_check_table([missing], header="Slack preflight")
+        raise SystemExit(1)
+
+    if not print_check_table(_probe_slack(slack_token), header="Slack preflight"):
+        raise SystemExit(1)
 
 
 @slack.command("start")

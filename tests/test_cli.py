@@ -15,13 +15,23 @@ def _make_fake_run_agent_in_sandbox(seen=None):
         if seen is not None:
             seen["request_id"] = request_id
             seen["prompt"] = request.prompt
+            seen["request"] = request
         yield json.dumps(
             {
                 "type": "assistant",
                 "message": {"content": [{"type": "text", "text": f"handled: {request.prompt}"}]},
             }
         )
-        yield json.dumps({"type": "result", "subtype": "success", "num_turns": 1, "cost_usd": 0.0})
+        yield json.dumps(
+            {
+                "type": "result",
+                "subtype": "success",
+                "num_turns": 1,
+                "cost_usd": 0.005,
+                "total_cost_usd": 0.005,
+                "model": request.model or "sonnet",
+            }
+        )
 
     return _run
 
@@ -59,6 +69,24 @@ class TestCli:
 
         assert result.exit_code == 1
         assert "image.bin is not a text file" in result.output
+
+    def test_query_rejects_files_exceeding_size_cap(self, tmp_path, monkeypatch):
+        """Regression: the CLI used to read_text() any size, letting a huge
+        file OOM the process before QueryRequest's 10MB/file validator fired.
+        Now the per-file cap is enforced upstream with a friendly error."""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        big = tmp_path / "huge.txt"
+        # 11 MB of newline-terminated ascii — just above the 10 MB cap
+        big.write_text("a\n" * (11 * 1024 * 1024 // 2))
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["query", "summarise", "-f", str(big)])
+
+        assert result.exit_code == 1
+        assert "huge.txt" in result.output
+        assert "max" in result.output
 
     def test_query_uses_relative_paths_for_uploaded_files(self, tmp_path, monkeypatch):
         monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
@@ -690,3 +718,145 @@ class TestCli:
 
         assert result.exit_code == 1
         assert "URL must use http:// or https://" in result.output
+
+
+class TestUpgrade:
+    def test_upgrade_already_at_latest(self, monkeypatch):
+        import importlib.metadata
+
+        from sandstorm.cli import cli
+
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setattr(importlib.metadata, "version", lambda _: "1.2.3")
+
+        import io
+        import json as _json
+        from unittest.mock import patch
+
+        class _FakeResp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps({"info": {"version": "1.2.3"}, "releases": {}}).encode()
+
+        with patch("urllib.request.urlopen", return_value=_FakeResp()):
+            result = CliRunner().invoke(cli, ["upgrade"])
+        assert result.exit_code == 0
+        assert "Already up to date" in result.output
+
+    def test_upgrade_prompts_before_install(self, monkeypatch):
+        import importlib.metadata
+
+        from sandstorm.cli import cli
+
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setattr(importlib.metadata, "version", lambda _: "0.8.1")
+
+        import io
+        import json as _json
+        from unittest.mock import patch
+
+        class _FakeResp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return _json.dumps(
+                    {
+                        "info": {"version": "0.9.0"},
+                        "releases": {"0.9.0": [{"upload_time_iso_8601": "2026-04-17T00:00:00Z"}]},
+                    }
+                ).encode()
+
+        with patch("urllib.request.urlopen", return_value=_FakeResp()):
+            # Answer "n" to the upgrade prompt — no install runs
+            result = CliRunner().invoke(cli, ["upgrade"], input="n\n")
+        assert result.exit_code == 0
+        assert "0.9.0" in result.output
+        assert "Cancelled" in result.output
+
+
+class TestReplay:
+    def test_replay_unknown_id_exits_with_error(self, tmp_path, monkeypatch):
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        # Point run_store at an empty JSONL so no runs are visible to replay
+        from sandstorm.store import RunStore
+
+        monkeypatch.setattr("sandstorm.store.run_store", RunStore(path=tmp_path / "runs.jsonl"))
+
+        runner = CliRunner()
+        result = runner.invoke(cli, ["replay", "nonexistent"])
+        assert result.exit_code == 1
+        assert "not found" in result.output
+
+    def test_replay_forks_session_and_reports_metrics(self, tmp_path, monkeypatch):
+        _disable_dotenv(monkeypatch)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+
+        from sandstorm.store import RunStore
+
+        rs = RunStore(path=tmp_path / "runs.jsonl")
+        rs.create(
+            id="orig-1",
+            prompt="compare two things",
+            model="claude-opus-4-7",
+            raw_prompt="compare these two competitor pricing pages",
+            config_snapshot={
+                "model": "claude-opus-4-7",
+                "allowed_tools": ["Read", "Bash"],
+                "timeout": 300,
+            },
+        )
+        rs.complete(
+            id="orig-1",
+            cost_usd=0.15,
+            num_turns=8,
+            duration_secs=42.0,
+            model="claude-opus-4-7",
+            agent_session_id="sess_original_abc",
+        )
+        monkeypatch.setattr("sandstorm.store.run_store", rs)
+
+        import sandstorm.sandbox as sandbox
+
+        seen: dict = {}
+        monkeypatch.setattr(sandbox, "run_agent_in_sandbox", _make_fake_run_agent_in_sandbox(seen))
+
+        runner = CliRunner()
+        result = runner.invoke(
+            cli,
+            [
+                "replay",
+                "orig-1",
+                "--model",
+                "claude-haiku-4-5-20251001",
+                "--budget",
+                "0.05",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+        # Verify replay used the raw_prompt + forked the original session
+        req = seen["request"]
+        assert req.prompt == "compare these two competitor pricing pages"
+        assert req.model == "claude-haiku-4-5-20251001"
+        assert req.resume == "sess_original_abc"
+        assert req.fork_session is True
+        assert req.max_budget_usd == 0.05
+
+        # Report written to stderr (CliRunner captures stderr with output by default
+        # when mix_stderr=True, which is the default).
+        assert "Replay report" in result.output
+        assert "orig-1" in result.output
+        assert "claude-haiku-4-5-20251001" in result.output

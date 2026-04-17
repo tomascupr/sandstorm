@@ -20,6 +20,7 @@ def test_starter_catalog_contains_expected_slugs():
         "support-triage",
         "api-extractor",
         "security-audit",
+        "code-review",
     ]
 
 

@@ -166,6 +166,105 @@ class TestJsonlPersistence:
         store = RunStore(path=tmp_path / "nonexistent" / "runs.jsonl")
         assert store.list() == []
 
+    def test_loads_pre_upgrade_rows_without_new_fields(self, tmp_path):
+        """Rows written by pre-v0.9 versions lack new replay/resume fields; they must
+        still load with defaults (forward-compat for deployments upgrading in place)."""
+        path = tmp_path / "runs.jsonl"
+        pre_upgrade_row = {
+            "id": "legacy-1",
+            "prompt": "old prompt",
+            "model": "claude-sonnet-4-20250514",
+            "status": "completed",
+            "started_at": "2025-01-01T00:00:00+00:00",
+            "cost_usd": 0.02,
+            "num_turns": 3,
+            "duration_secs": 12.0,
+            "error": None,
+            "files_count": 0,
+            "feedback": None,
+            "feedback_user": None,
+        }
+        path.write_text(json.dumps(pre_upgrade_row) + "\n")
+        store = RunStore(path=path)
+        runs = store.list()
+        assert len(runs) == 1
+        r = runs[0]
+        assert r["id"] == "legacy-1"
+        # New fields default cleanly
+        assert r["raw_prompt"] == ""
+        assert r["agent_session_id"] is None
+        assert r["sandbox_id"] is None
+        assert r["team_id"] is None
+        assert r["config_snapshot"] is None
+
+    def test_compacts_jsonl_beyond_10x_maxlen(self, tmp_path):
+        """Each status transition appends a line, so long-running deployments
+        accumulate stale records. On load, when the file grows past 10x the
+        deque cap, the store rewrites it to the live in-deque set."""
+        path = tmp_path / "runs.jsonl"
+        # Directly stuff the JSONL with 60 lines of plausible data. The store
+        # has maxlen=5, so anything beyond 5 will be evicted in memory — and
+        # the file should be compacted on next load because 60 > 5 * 10.
+        import json as _json
+
+        with path.open("w") as f:
+            for i in range(60):
+                f.write(
+                    _json.dumps(
+                        {
+                            "id": f"r{i}",
+                            "prompt": "p",
+                            "model": None,
+                            "status": "completed",
+                            "started_at": "2026-04-17T00:00:00+00:00",
+                        }
+                    )
+                    + "\n"
+                )
+
+        store = RunStore(path=path, maxlen=5)
+        # File must now hold exactly the live 5 entries
+        lines = path.read_text().splitlines()
+        assert len(lines) == 5
+        loaded_ids = [r["id"] for r in store.list()]
+        # Newest-first, so r59..r55 (deque kept the last 5)
+        assert loaded_ids[0] == "r59"
+
+    def test_new_fields_persist_on_create_and_complete(self, tmp_path):
+        path = tmp_path / "runs.jsonl"
+        store = RunStore(path=path)
+        store.create(
+            id="r1",
+            prompt="x" * 200,  # display-truncated, raw kept full
+            model="claude-opus-4-7",
+            team_id="T_abc",
+            user_id="U_xyz",
+            channel_id="C_chan",
+            thread_ts="1700000000.000001",
+            config_snapshot={"model": "claude-opus-4-7", "allowed_tools": ["Read"]},
+        )
+        store.complete(
+            id="r1",
+            cost_usd=0.03,
+            num_turns=2,
+            duration_secs=6.0,
+            agent_session_id="sess_12345",
+            sandbox_id="sbx_abc",
+        )
+        # Reload from disk to confirm persistence
+        store2 = RunStore(path=path)
+        runs = store2.list()
+        assert len(runs) == 1
+        r = runs[0]
+        assert r["raw_prompt"] == "x" * 200
+        assert r["team_id"] == "T_abc"
+        assert r["user_id"] == "U_xyz"
+        assert r["channel_id"] == "C_chan"
+        assert r["thread_ts"] == "1700000000.000001"
+        assert r["config_snapshot"] == {"model": "claude-opus-4-7", "allowed_tools": ["Read"]}
+        assert r["agent_session_id"] == "sess_12345"
+        assert r["sandbox_id"] == "sbx_abc"
+
     def test_empty_file_starts_empty(self, tmp_path):
         path = tmp_path / "runs.jsonl"
         path.write_text("")

@@ -10,6 +10,7 @@ from typing import Any
 from dotenv import dotenv_values
 from dotenv import load_dotenv as _load_dotenv
 
+from .memory import memory_store
 from .models import NAME_PATTERN, QueryRequest
 
 logger = logging.getLogger(__name__)
@@ -351,6 +352,9 @@ def _build_agent_config(
     # Build system prompt, then apply append from config if set
     sys_prompt = sandstorm_config.get("system_prompt")
     env_append = sandstorm_config.get("system_prompt_append")
+    memory_prefix = memory_store.as_prompt_prefix(request.team_id, request.user_id)
+    if memory_prefix:
+        env_append = memory_prefix + env_append if env_append else memory_prefix
     if env_append and sys_prompt:
         if isinstance(sys_prompt, dict) and "append" in sys_prompt:
             sys_prompt = {**sys_prompt, "append": sys_prompt["append"] + "\n\n" + env_append}
@@ -380,6 +384,11 @@ def _build_agent_config(
         "has_skills": has_skills,
         "allowed_tools": allowed_tools,
         "timeout": timeout,
+        # Session controls for resume / ds replay — passed verbatim to runner.mjs
+        # which maps them onto Agent SDK query() options.
+        "resume": request.resume,
+        "fork_session": request.fork_session,
+        "max_budget_usd": request.max_budget_usd,
     }
 
     return agent_config, merged_skills

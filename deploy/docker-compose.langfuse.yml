@@ -1,0 +1,46 @@
+services:
+  langfuse-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: langfuse
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+    volumes:
+      - langfuse-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:latest
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: change-me-in-prod
+      SALT: change-me-in-prod
+      NEXTAUTH_URL: http://localhost:3000
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "3000:3000"
+
+  sandstorm:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    depends_on:
+      - langfuse
+    environment:
+      SANDSTORM_TELEMETRY: "1"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://langfuse:3000/api/public/otel
+      OTEL_SERVICE_NAME: sandstorm
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      E2B_API_KEY: ${E2B_API_KEY}
+    ports:
+      - "8000:8000"
+
+volumes:
+  langfuse-db-data:

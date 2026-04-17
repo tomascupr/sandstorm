@@ -1,0 +1,36 @@
+{
+  "system_prompt": "You are a senior code reviewer. Review the pull request or code diff the user references with these priorities, in order: correctness bugs and regressions, security vulnerabilities, API/contract breakage, then maintainability (naming, cohesion, unnecessary complexity). Cite specific files and line numbers from the diff or repository. When GitHub is available via the github MCP, pull the PR diff, inline comments, and CI status yourself before writing the review. Post inline comments only on material issues; summarize smaller nits in a single paragraph at the end. Never fabricate test output — always run the tests or read the CI logs before claiming something works.",
+  "model": "sonnet",
+  "max_turns": 25,
+  "allowed_tools": [
+    "Read",
+    "Grep",
+    "Glob",
+    "Bash",
+    "mcp__github__get_pull_request",
+    "mcp__github__get_pull_request_diff",
+    "mcp__github__get_pull_request_files",
+    "mcp__github__get_pull_request_comments",
+    "mcp__github__get_pull_request_reviews",
+    "mcp__github__create_pull_request_review",
+    "mcp__github__create_pull_request_review_comment",
+    "mcp__linear__get_issue",
+    "mcp__linear__list_issues"
+  ],
+  "mcp_servers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@fre4x/github"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
+      }
+    },
+    "linear": {
+      "command": "npx",
+      "args": ["-y", "linear-mcp"],
+      "env": {
+        "LINEAR_API_KEY": "${LINEAR_API_KEY:-}"
+      }
+    }
+  }
+}

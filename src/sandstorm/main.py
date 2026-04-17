@@ -20,9 +20,10 @@ from .auth import load_api_keys, verify_api_token
 from .config import load_project_dotenv as load_dotenv
 from .config import load_sandstorm_config
 from .e2b_api import webhook_request
+from .memory import memory_store
 from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
-from .store import run_store
+from .store import build_config_snapshot, run_store
 from .telemetry import (
     get_tracer,
     record_error,
@@ -263,6 +264,9 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
         request.model,
     )
 
+    if request.remember:
+        memory_store.remember(request.team_id, request.user_id, request.remember)
+
     async def event_generator():
         start = time.monotonic()
         run_store.create(
@@ -270,16 +274,29 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
             prompt=request.prompt,
             model=request.model,
             files_count=len(request.files) if request.files else 0,
+            team_id=request.team_id,
+            user_id=request.user_id,
+            raw_prompt=request.prompt,
+            config_snapshot=build_config_snapshot(
+                {
+                    "model": request.model,
+                    "max_turns": request.max_turns,
+                    "timeout": request.timeout,
+                    "allowed_tools": request.allowed_tools,
+                    "files": request.files,
+                }
+            ),
         )
         cost_usd = None
         num_turns = None
         model = request.model
+        agent_session_id: str | None = None
         with get_tracer().start_as_current_span(
             "query",
             attributes={
                 "sandstorm.request_id": req_id,
                 "sandstorm.model": request.model or "",
-                "sandstorm.timeout": request.timeout,
+                "sandstorm.timeout": request.timeout or 0,
                 "sandstorm.file_count": len(request.files) if request.files else 0,
             },
         ) as span:
@@ -292,8 +309,13 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                             cost = parsed.get("total_cost_usd")
                             cost_usd = cost if cost is not None else parsed.get("cost_usd")
                             num_turns = parsed.get("num_turns")
+                            # Some SDK versions emit session_id on the result too
+                            agent_session_id = parsed.get("session_id") or agent_session_id
                         elif parsed.get("type") == "system" and parsed.get("subtype") == "init":
                             model = parsed.get("model") or model
+                            # Captured at init so follow-up runs in the same Slack
+                            # thread can `resume=<session_id>` to preserve context
+                            agent_session_id = parsed.get("session_id") or agent_session_id
                     except (json.JSONDecodeError, TypeError):
                         pass
                     yield {"data": line}
@@ -311,7 +333,14 @@ async def query(request: QueryRequest, token: str = Depends(verify_api_token)):
                 record_request(model=request.model, status="ok")
                 logger.info("[%s] Query completed", req_id)
                 duration = time.monotonic() - start
-                run_store.complete(req_id, cost_usd, num_turns, duration, model)
+                run_store.complete(
+                    req_id,
+                    cost_usd,
+                    num_turns,
+                    duration,
+                    model,
+                    agent_session_id=agent_session_id,
+                )
             finally:
                 record_request_duration(time.monotonic() - start, model=request.model)
 

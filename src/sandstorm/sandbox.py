@@ -40,7 +40,7 @@ TEMPLATE = os.environ.get("SANDSTORM_TEMPLATE", "work-43ca/sandstorm")
 FALLBACK_TEMPLATE = "claude-code"
 
 # Claude Agent SDK version — single source of truth (also imported by build_template.py)
-SDK_VERSION = "0.2.42"
+SDK_VERSION = "0.2.112"
 
 _QUEUE_MAXSIZE = 10_000  # Buffer for sync→async bridge; drops if consumer is slow
 _SDK_INSTALL_TIMEOUT = 120  # Fallback npm install timeout (seconds)
@@ -218,7 +218,7 @@ async def run_agent_in_sandbox(
         input_file_names.update(binary_files.keys())
 
     if sandbox_id:
-        # --- Reconnect path: reuse an existing sandbox ---
+        # connect() auto-resumes a paused sandbox; callers handle NotFoundException.
         logger.info("[%s] Reconnecting to sandbox %s", request_id, sandbox_id)
         sbx = await AsyncSandbox.connect(sandbox_id, api_key=request.e2b_api_key)
         await sbx.set_timeout(timeout)
@@ -426,11 +426,21 @@ async def run_agent_in_sandbox(
                     task.result()
                 except Exception:
                     logger.warning("[%s] Task exception suppressed", request_id, exc_info=True)
-            logger.info(
-                "[%s] Keeping sandbox %s alive (timeout=%ds)",
-                request_id,
-                sbx.sandbox_id,
-                timeout,
-            )
+            # Pause preserves filesystem + running processes and stops billing
+            # for compute. connect() on the next message auto-resumes. If pause
+            # fails, fall back to kill() so we never orphan a billable sandbox.
+            try:
+                await sbx.pause()
+                logger.info("[%s] Paused sandbox %s", request_id, sbx.sandbox_id)
+            except Exception:
+                logger.error(
+                    "[%s] Failed to pause sandbox %s — killing instead to avoid "
+                    "orphaning a billable sandbox",
+                    request_id,
+                    sbx.sandbox_id,
+                    exc_info=True,
+                )
+                with contextlib.suppress(Exception):
+                    await sbx.kill()
         else:
             await _cleanup(task, sbx, request_id)
