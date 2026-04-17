@@ -1,11 +1,14 @@
-FROM python:3.12-slim
+FROM python:3.13-slim-bookworm
 
 WORKDIR /app
 
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
 
-RUN pip install --no-cache-dir .
+# Install with slack + telemetry extras so the default container can run the
+# Slack bot out of the box and export OTel traces. Users who don't need them
+# just ignore the extra deps.
+RUN pip install --no-cache-dir ".[slack,telemetry]"
 
 RUN useradd --create-home appuser
 USER appuser
