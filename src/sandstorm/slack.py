@@ -806,7 +806,21 @@ def create_slack_app(
             await say("Please provide a prompt.")
             return
 
-        await set_status("Spinning up sandbox...")
+        # bolt-python 1.28 lets set_status rotate through a list of loading
+        # messages so the user sees visible progress instead of a single static
+        # status. Fall through to the positional form on older bolt versions.
+        try:
+            await set_status(
+                status="Spinning up sandbox...",
+                loading_messages=[
+                    "Warming up the sandbox...",
+                    "Pulling thread context...",
+                    "Running tools...",
+                    "Writing the answer...",
+                ],
+            )
+        except TypeError:
+            await set_status("Spinning up sandbox...")
         run_id = uuid.uuid4().hex[:8]
         tenant = context.get("enterprise_id") or context.get("team_id")
         request, binary_files = await _prepare_prompt(

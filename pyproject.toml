@@ -31,7 +31,7 @@ classifiers = [
 
 [project.optional-dependencies]
 slack = [
-    "slack-bolt>=1.21.0",
+    "slack-bolt>=1.28.0",
     "slack-sdk>=3.34.0",
     "aiohttp>=3.9.0",
 ]
