@@ -108,11 +108,13 @@ def _build_query_request(
     team_id: str | None = None,
     user_id: str | None = None,
     model: str | None = None,
+    channel_id: str | None = None,
 ) -> QueryRequest:
     """Build QueryRequest from prompt, deferring model/timeout to sandstorm.json.
 
-    When team_id/user_id are passed, the server-side memory injection in
-    config._build_agent_config will scope remembered context to that user.
+    When team_id/user_id/channel_id are passed, the server-side memory
+    injection in config._build_agent_config scopes the three-level memory
+    (team + channel + user) appropriately.
 
     API keys resolved by QueryRequest.resolve_api_keys() as usual.
     """
@@ -128,6 +130,7 @@ def _build_query_request(
         max_turns=None,
         team_id=team_id,
         user_id=user_id,
+        channel_id=channel_id,
     )
 
 
@@ -605,6 +608,7 @@ def create_slack_app(
             team_id=team_id,
             user_id=user_id,
             model=model_override or overlay_model,
+            channel_id=channel,
         )
         if overlay_allowed_tools is not None and request.allowed_tools is None:
             request.allowed_tools = list(overlay_allowed_tools)
@@ -888,6 +892,18 @@ def create_slack_app(
         tenant = command.get("enterprise_id") or command.get("team_id")
         return tenant, command.get("user_id")
 
+    def _parse_scope_filter(text: str) -> tuple[str, str | None]:
+        """Split `/memories team` or `/forget foo channel` into (remainder, scope)."""
+        stripped = text.strip()
+        for word in ("team", "channel", "user"):
+            if stripped == word:
+                return "", word
+            if stripped.startswith(word + " "):
+                return stripped[len(word) + 1 :].strip(), word
+            if stripped.endswith(" " + word):
+                return stripped[: -(len(word) + 1)].strip(), word
+        return stripped, None
+
     @app.command("/remember")
     async def handle_remember(ack, command, respond):
         await ack()
@@ -896,23 +912,64 @@ def create_slack_app(
             await respond(text="Usage: `/remember <fact>`. Example: `/remember likes oat milk`.")
             return
         team_id, user_id = _command_scope(command)
-        memory_store.remember(team_id, user_id, text)
-        await respond(text=f"Remembered: _{text}_")
+        memory_store.remember(team_id, user_id, text, scope="user")
+        await respond(text=f"Remembered (user): _{text}_")
+
+    @app.command("/team-remember")
+    async def handle_team_remember(ack, command, respond):
+        await ack()
+        text = (command.get("text") or "").strip()
+        if not text:
+            await respond(
+                text="Usage: `/team-remember <fact>`. Example: `/team-remember we ship to Berlin`."
+            )
+            return
+        team_id, user_id = _command_scope(command)
+        memory_store.remember(team_id, user_id, text, scope="team")
+        await respond(text=f"Remembered (team): _{text}_")
+
+    @app.command("/channel-remember")
+    async def handle_channel_remember(ack, command, respond):
+        await ack()
+        text = (command.get("text") or "").strip()
+        channel_id = command.get("channel_id") or ""
+        if not text:
+            await respond(
+                text=(
+                    "Usage: `/channel-remember <fact>`. "
+                    "Visible to everyone who uses Sandstorm in this channel."
+                )
+            )
+            return
+        if not channel_id:
+            await respond(text="Channel-scoped memory requires a channel context.")
+            return
+        team_id, user_id = _command_scope(command)
+        memory_store.remember(team_id, user_id, text, scope="channel", channel_id=channel_id)
+        await respond(text=f"Remembered (channel): _{text}_")
 
     @app.command("/forget")
     async def handle_forget(ack, command, respond):
         await ack()
-        substring = (command.get("text") or "").strip()
+        raw = (command.get("text") or "").strip()
+        substring, scope_filter = _parse_scope_filter(raw)
         if not substring:
             await respond(
                 text=(
-                    "Usage: `/forget <substring>`. Example: `/forget oat milk`."
-                    " Forgets every memory whose text contains the substring (case-insensitive)."
+                    "Usage: `/forget <substring> [user|channel|team]`. "
+                    "Omit the scope to match all visible memories."
                 )
             )
             return
         team_id, user_id = _command_scope(command)
-        deleted = memory_store.forget(team_id, user_id, substring)
+        channel_id = command.get("channel_id") or None
+        deleted = memory_store.forget(
+            team_id,
+            user_id,
+            substring,
+            scope=scope_filter,  # type: ignore[arg-type]
+            channel_id=channel_id,
+        )
         if deleted:
             await respond(text=f"Forgot {deleted} memor{'y' if deleted == 1 else 'ies'}.")
         else:
@@ -921,13 +978,24 @@ def create_slack_app(
     @app.command("/memories")
     async def handle_memories(ack, command, respond):
         await ack()
+        raw = (command.get("text") or "").strip()
+        _, scope_filter = _parse_scope_filter(raw)
         team_id, user_id = _command_scope(command)
-        memories = memory_store.list(team_id, user_id)
+        channel_id = command.get("channel_id") or None
+        memories = memory_store.list(
+            team_id,
+            user_id,
+            scope=scope_filter,  # type: ignore[arg-type]
+            channel_id=channel_id,
+        )
         if not memories:
             await respond(text="No memories yet. Use `/remember <fact>` to add one.")
             return
-        lines = [f"{i + 1}. {m.text}" for i, m in enumerate(memories)]
-        await respond(text="Your memories:\n" + "\n".join(lines))
+        lines = [f"{i + 1}. [{m.scope}] {m.text}" for i, m in enumerate(memories)]
+        header = (
+            "Your memories" if scope_filter is None else f"{scope_filter.capitalize()} memories"
+        )
+        await respond(text=f"{header}:\n" + "\n".join(lines))
 
     @app.command("/model")
     async def handle_model(ack, command, respond):

@@ -354,7 +354,9 @@ def _build_agent_config(
     # Build system prompt, then apply append from config if set
     sys_prompt = sandstorm_config.get("system_prompt")
     env_append = sandstorm_config.get("system_prompt_append")
-    memory_prefix = memory_store.as_prompt_prefix(request.team_id, request.user_id)
+    memory_prefix = memory_store.as_prompt_prefix(
+        request.team_id, request.user_id, channel_id=request.channel_id
+    )
     if memory_prefix:
         env_append = memory_prefix + env_append if env_append else memory_prefix
     if env_append and sys_prompt:

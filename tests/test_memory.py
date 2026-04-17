@@ -134,6 +134,86 @@ class TestJsonlPersistence:
         assert [m.text for m in store.list("T1", "U1")] == ["valid"]
 
 
+class TestThreeLevelScope:
+    def test_team_scope_shared_across_users(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "company holiday Monday", scope="team")
+
+        # Different user in the same team sees the team fact
+        seen_by_other = store.list("T1", "UB", scope="team")
+        assert [m.text for m in seen_by_other] == ["company holiday Monday"]
+
+        # Different team does NOT see it
+        other_team = store.list("T2", "UA", scope="team")
+        assert other_team == []
+
+    def test_channel_scope_isolation(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "support rotation", scope="channel", channel_id="C_SUPPORT")
+        store.remember("T1", "UA", "eng rotation", scope="channel", channel_id="C_ENG")
+
+        support_view = store.list("T1", "UB", scope="channel", channel_id="C_SUPPORT")
+        assert [m.text for m in support_view] == ["support rotation"]
+        # Different channel, same user: no crossover
+        eng_view = store.list("T1", "UB", scope="channel", channel_id="C_ENG")
+        assert [m.text for m in eng_view] == ["eng rotation"]
+
+    def test_channel_scope_requires_channel_id(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        with pytest.raises(ValueError, match="channel_id"):
+            store.remember("T1", "U1", "x", scope="channel")
+
+    def test_combined_prefix_orders_team_channel_user(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "user fact", scope="user")
+        store.remember("T1", "UA", "channel fact", scope="channel", channel_id="C1")
+        store.remember("T1", "UA", "team fact", scope="team")
+        prefix = store.as_prompt_prefix("T1", "UA", channel_id="C1")
+        assert prefix.index("team fact") < prefix.index("channel fact")
+        assert prefix.index("channel fact") < prefix.index("user fact")
+
+    def test_list_combined_view_without_channel_id_skips_channel(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "team fact", scope="team")
+        store.remember("T1", "UA", "channel fact", scope="channel", channel_id="C1")
+        store.remember("T1", "UA", "user fact", scope="user")
+        # No channel_id = no channel memories visible
+        seen = store.list("T1", "UA")
+        assert "channel fact" not in [m.text for m in seen]
+        assert {m.text for m in seen} == {"team fact", "user fact"}
+
+    def test_forget_scoped_filter(self, tmp_path):
+        store = MemoryStore(path=tmp_path / "m.jsonl")
+        store.remember("T1", "UA", "shared holiday", scope="team")
+        store.remember("T1", "UA", "my preference holiday", scope="user")
+        # Forget only user-scoped
+        deleted = store.forget("T1", "UA", "holiday", scope="user")
+        assert deleted == 1
+        team_still = [m.text for m in store.list("T1", "UA", scope="team")]
+        assert team_still == ["shared holiday"]
+
+    def test_back_compat_loads_pre_v091_rows(self, tmp_path):
+        """Old JSONL rows without scope/channel_id default to user scope."""
+        path = tmp_path / "m.jsonl"
+        pre_v091 = {
+            "id": "abc",
+            "team_id": "T1",
+            "user_id": "UA",
+            "text": "old school",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "deleted": False,
+        }
+        import json as _json
+
+        path.write_text(_json.dumps(pre_v091) + "\n")
+
+        store = MemoryStore(path=path)
+        seen = store.list("T1", "UA", scope="user")
+        assert [m.text for m in seen] == ["old school"]
+        assert seen[0].scope == "user"
+        assert seen[0].channel_id is None
+
+
 class TestDequeEviction:
     def test_maxlen_evicts_oldest(self, tmp_path):
         store = MemoryStore(path=tmp_path / "m.jsonl", maxlen=3)

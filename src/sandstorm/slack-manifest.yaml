@@ -19,15 +19,23 @@ features:
         message: "Draft a summary from this document..."
   slash_commands:
     - command: /remember
-      description: Remember a fact for your future Sandstorm agent runs
+      description: Remember a personal fact for your future Sandstorm agent runs
       usage_hint: "likes oat milk"
       should_escape: false
+    - command: /team-remember
+      description: Remember a fact for the whole tenant (visible to every user)
+      usage_hint: "we ship to Berlin"
+      should_escape: false
+    - command: /channel-remember
+      description: Remember a fact scoped to the current channel
+      usage_hint: "our on-call rotation is Mon-Fri"
+      should_escape: false
     - command: /forget
-      description: Forget any remembered fact containing a substring
+      description: Forget any remembered fact containing a substring (optional scope filter)
       usage_hint: "oat milk"
       should_escape: false
     - command: /memories
-      description: List the facts Sandstorm remembers for you
+      description: List the facts Sandstorm remembers (optional scope filter)
       should_escape: false
     - command: /model
       description: Override the model used for this thread (ephemeral until restart)
