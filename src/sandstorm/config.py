@@ -151,6 +151,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "timeout": ((int,), "int"),
         "template_skills": ((bool,), "bool"),
         "triggers": ((list,), "list"),
+        "channels": ((dict,), "dict"),
     }
 
     validated: dict = {}

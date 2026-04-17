@@ -591,13 +591,23 @@ def create_slack_app(
         model_override = _thread_model_overrides.get(
             (team_id or "", channel, f"user:{user_id or ''}")
         )
+        # Per-channel overlay (model / starter / allowed_tools). Explicit user
+        # overrides via /model still win because they are applied afterwards.
+        from .channels import resolve_channel_config
+        from .config import load_sandstorm_config
+
+        overlay = resolve_channel_config(load_sandstorm_config(), channel)
+        overlay_model = overlay.get("model") if overlay else None
+        overlay_allowed_tools = overlay.get("allowed_tools") if overlay else None
         request = _build_query_request(
             full_prompt,
             text_files or None,
             team_id=team_id,
             user_id=user_id,
-            model=model_override,
+            model=model_override or overlay_model,
         )
+        if overlay_allowed_tools is not None and request.allowed_tools is None:
+            request.allowed_tools = list(overlay_allowed_tools)
 
         prior_run = run_store.find_thread_session(team_id, channel, thread_ts)
         if prior_run and prior_run.agent_session_id:
