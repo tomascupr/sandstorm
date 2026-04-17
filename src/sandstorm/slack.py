@@ -341,6 +341,7 @@ async def _stream_to_slack(
         "num_turns": None,
         "duration_secs": None,
         "error": None,
+        "agent_session_id": None,
     }
 
     start = time.monotonic()
@@ -352,6 +353,17 @@ async def _stream_to_slack(
         prompt=request.prompt,
         model=request.model,
         files_count=len(request.files) if request.files else 0,
+        raw_prompt=request.prompt,
+        team_id=request.team_id,
+        user_id=request.user_id,
+        channel_id=channel,
+        thread_ts=thread_ts,
+        sandbox_id=sandbox_id,
+        config_snapshot={
+            "model": request.model,
+            "allowed_tools": request.allowed_tools,
+            "timeout": request.timeout,
+        },
     )
 
     try:
@@ -374,6 +386,10 @@ async def _stream_to_slack(
             if event_type == "system" and event.get("subtype") == "init":
                 model = event.get("model")
                 metadata["model"] = model
+                # Captured so the next message in this thread can resume the session
+                metadata["agent_session_id"] = (
+                    event.get("session_id") or metadata["agent_session_id"]
+                )
                 if set_status:
                     await set_status(f"Running agent on {model}...")
 
@@ -423,12 +439,23 @@ async def _stream_to_slack(
                 except Exception:
                     logger.error("[%s] streamer.stop failed", run_id, exc_info=True)
 
+                # Some SDK versions also surface session_id on the result event
+                metadata["agent_session_id"] = (
+                    event.get("session_id") or metadata["agent_session_id"]
+                )
+                if metadata["agent_session_id"] is None:
+                    logger.info(
+                        "[%s] No agent_session_id captured — next thread message "
+                        "will not resume the session",
+                        run_id,
+                    )
                 run_store.complete(
                     run_id,
                     cost_usd=metadata["cost_usd"],
                     num_turns=metadata["num_turns"],
                     duration_secs=metadata["duration_secs"],
                     model=metadata["model"],
+                    agent_session_id=metadata["agent_session_id"],
                 )
 
             elif event_type == "error":
@@ -558,7 +585,28 @@ def create_slack_app(
             user_id=user_id,
             model=model_override,
         )
+
+        # Resume the prior agent session in this thread so the model keeps its
+        # transcript + planning state across messages. Falls back to the
+        # _gather_thread_context text-based approach if no session_id is saved.
+        prior_session_id = _find_thread_session(team_id, channel, thread_ts)
+        if prior_session_id:
+            request.resume = prior_session_id
+
         return request, binary_files
+
+    def _find_thread_session(team_id: str | None, channel: str, thread_ts: str) -> str | None:
+        """Most recent completed Run in this thread that recorded a session_id."""
+        for run in reversed(run_store._runs):
+            if (
+                run.team_id == team_id
+                and run.channel_id == channel
+                and run.thread_ts == thread_ts
+                and run.agent_session_id
+                and run.status == "completed"
+            ):
+                return run.agent_session_id
+        return None
 
     async def _run_in_sandbox_pool(
         *,
