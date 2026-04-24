@@ -41,7 +41,7 @@ If `ANTHROPIC_API_KEY` or `E2B_API_KEY` are missing, the guided flow prompts for
 ## Prerequisites
 
 - Python 3.11+
-- An [E2B](https://e2b.dev) API key
+- An [E2B](https://e2b.dev) API key for the default sandbox runtime
 - An [Anthropic](https://console.anthropic.com) API key, or an alternate provider configured through [OpenRouter](openrouter.md) or the provider env vars in [configuration](configuration.md)
 - `uv` only if you want a source checkout workflow
 
@@ -155,7 +155,7 @@ ds init
 
 Each request follows the same basic path:
 
-1. Sandstorm creates a fresh E2B sandbox.
+1. Sandstorm creates a fresh sandbox with the configured runtime, E2B by default.
 2. It uploads your config, prompt, and any files.
 3. The Claude Agent SDK runs inside the sandbox with the configured tools.
 4. Sandstorm streams events back over CLI, API, or Slack.

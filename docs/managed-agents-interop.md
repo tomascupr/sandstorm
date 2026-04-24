@@ -26,7 +26,7 @@ What it does **not** ship:
 
 - **A scheduler**: cron (sub-hourly, unlike Claude Code Routines' 1-hour
   minimum) that can fire Managed Agents sessions or run agents in your
-  own E2B sandbox
+  own sandbox runtime, E2B by default
 - **A Slack bot**: @mentions, DMs, slash commands, App Home, pause/resume
   per-thread sandboxes
 - **Multi-provider**: Anthropic, OpenRouter, Vertex, Bedrock, Azure
@@ -105,15 +105,14 @@ to stay self-hosted, use Sandstorm.
 
 ## Migrating from the Anthropic Slack cookbook recipe
 
-If you followed the [Claude Managed Agents Slack data bot](
-https://platform.claude.com/cookbook/managed-agents-slack-data-bot) recipe,
+If you followed the [Claude Managed Agents Slack data bot](https://platform.claude.com/cookbook/managed-agents-slack-data-bot) recipe,
 here's the direct Sandstorm equivalent:
 
 | Recipe step | Sandstorm equivalent |
 | ----------- | -------------------- |
 | `pip install slack-bolt anthropic` | `pip install "duvo-sandstorm[slack]"` |
 | Hand-roll a Bolt app with `@app.event("app_mention")` | Already wired; run `ds slack setup` |
-| Thread a CMA session through `anthropic.beta.sessions.create` | Set `"model": "sonnet"` in `sandstorm.json`; agent runs in your E2B sandbox |
+| Thread a CMA session through `anthropic.beta.sessions.create` | Set `"model": "sonnet"` in `sandstorm.json`; agent runs in your configured sandbox runtime |
 | Wire file upload | Already wired (see `_download_thread_files`) |
 | Wire feedback UI | Already wired (feedback buttons in the metadata footer) |
 | Redeploy to update prompts | Edit `sandstorm.json`; the next run picks up changes without a restart |

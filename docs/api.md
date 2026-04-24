@@ -29,7 +29,7 @@ Runs an agent request and returns a `text/event-stream` response.
 | `prompt` | `string` | Yes | - | The task for the agent |
 | `anthropic_api_key` | `string` | No | `$ANTHROPIC_API_KEY` | Anthropic key override |
 | `openrouter_api_key` | `string` | No | `$OPENROUTER_API_KEY` | OpenRouter key override |
-| `e2b_api_key` | `string` | No | `$E2B_API_KEY` | E2B key override |
+| `e2b_api_key` | `string` | No | `$E2B_API_KEY` | E2B runtime key override; used only when `runtime.provider` is `e2b` |
 | `model` | `string` | No | from config | Overrides `sandstorm.json` |
 | `max_turns` | `integer` | No | from config | Overrides `sandstorm.json` |
 | `timeout` | `integer` | No | `300` | Sandbox lifetime in seconds |
@@ -108,12 +108,14 @@ Returns the service version and status:
 }
 ```
 
-Add `?deep=true` to verify configured API keys and E2B reachability.
+Add `?deep=true` to verify configured API keys and the selected sandbox runtime. With the
+current E2B runtime, deep checks validate E2B reachability.
 
 ## `POST /webhooks/e2b`
 
-Receives E2B sandbox lifecycle events such as `created`, `updated`, and `killed`.
+Receives E2B runtime sandbox lifecycle events such as `created`, `updated`, and `killed`.
 
 - Verifies HMAC-SHA256 signatures when `SANDSTORM_WEBHOOK_SECRET` is set
 - Used automatically when `webhook_url` is configured in `sandstorm.json`
 - Can also be exercised with `ds webhook test`
+- E2B-only lifecycle helper; it applies when `runtime.provider` is `e2b` or omitted

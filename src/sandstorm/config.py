@@ -49,6 +49,7 @@ _MCP_ENV_VAR_PATTERN = re.compile(
     r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?::-(?P<default>[^}]*))?\}"
 )
 _LOADED_DOTENV_VALUES: dict[str, str] = {}
+_RUNTIME_PROVIDERS = frozenset({"e2b"})
 
 # ── mtime-based config cache ──────────────────────────────────────────────────
 
@@ -147,6 +148,7 @@ def _validate_sandstorm_config(raw: dict) -> dict:
         "mcp_servers": ((dict,), "dict"),
         "skills_dir": ((str,), "str"),
         "allowed_tools": ((list,), "list"),
+        "runtime": ((dict,), "dict"),
         "webhook_url": ((str,), "str"),
         "timeout": ((int,), "int"),
         "template_skills": ((bool,), "bool"),
@@ -204,6 +206,23 @@ def _validate_sandstorm_config(raw: dict) -> dict:
     if "model" in validated and not validated["model"].strip():
         logger.warning("sandstorm.json: model must be a non-empty string — skipping")
         del validated["model"]
+
+    if "runtime" in validated:
+        runtime = validated["runtime"]
+        provider = runtime.get("provider")
+        if not isinstance(provider, str) or provider not in _RUNTIME_PROVIDERS:
+            logger.warning(
+                "sandstorm.json: runtime.provider must be one of %s — skipping",
+                ", ".join(sorted(_RUNTIME_PROVIDERS)),
+            )
+            del validated["runtime"]
+        else:
+            for runtime_key in sorted(set(runtime) - {"provider"}):
+                logger.warning(
+                    "sandstorm.json: unknown runtime field %r — ignoring",
+                    runtime_key,
+                )
+            validated["runtime"] = {"provider": provider}
 
     return validated
 

@@ -2,8 +2,8 @@
  * Minimal CLI example. Run against a local `ds serve`:
  *
  *   ds serve                           # in one terminal
- *   pnpm install
- *   pnpm tsx examples/chat.ts "your prompt here"
+ *   npm install
+ *   npm exec -- tsx examples/chat.ts "your prompt here"
  */
 import { SandstormClient } from "../src/index.js";
 

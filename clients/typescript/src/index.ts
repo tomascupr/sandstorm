@@ -1,7 +1,5 @@
 /**
- * @duvo/sandstorm-client
- *
- * Minimal TypeScript client for Sandstorm — stream agent runs over SSE, manage
+ * Repo-local TypeScript client source for Sandstorm. Stream agent runs over SSE, manage
  * memory via slash-command-equivalent endpoints, replay past runs.
  *
  * Example:

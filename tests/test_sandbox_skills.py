@@ -69,6 +69,25 @@ class TestValidateSandstormConfigSkills:
         config = _validate_sandstorm_config({"template_skills": 1})
         assert "template_skills" not in config
 
+    def test_runtime_provider_e2b_valid(self):
+        config = _validate_sandstorm_config({"runtime": {"provider": "e2b"}})
+        assert config["runtime"] == {"provider": "e2b"}
+
+    def test_runtime_wrong_type_dropped(self):
+        config = _validate_sandstorm_config({"runtime": "e2b"})
+        assert "runtime" not in config
+
+    def test_runtime_unknown_provider_dropped(self):
+        config = _validate_sandstorm_config({"runtime": {"provider": "local"}})
+        assert "runtime" not in config
+
+    def test_runtime_extra_keys_stripped_with_warning(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="sandstorm.config"):
+            config = _validate_sandstorm_config({"runtime": {"provider": "e2b", "region": "us"}})
+
+        assert config["runtime"] == {"provider": "e2b"}
+        assert "unknown runtime field 'region'" in caplog.text
+
     def test_max_turns_must_be_positive(self):
         config = _validate_sandstorm_config({"max_turns": 0})
         assert "max_turns" not in config

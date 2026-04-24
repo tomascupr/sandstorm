@@ -2,9 +2,9 @@
 
 **Claude Agent SDK, or any LLM, as a sandboxed agent in your Slack, on your infra.**
 
-CLI, HTTP API, Python client, Slack bot, and TypeScript client over the same runtime.
-Fresh E2B sandbox per thread, streaming, file uploads, replay, and OpenTelemetry traces
-out of the box.
+CLI, HTTP API, Python client, Slack bot, and repo-local TypeScript client source over
+the same runtime. Fresh sandbox per thread on the configured runtime, E2B by default,
+with streaming, file uploads, replay, and OpenTelemetry traces out of the box.
 
 [![CI](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml/badge.svg)](https://github.com/tomascupr/sandstorm/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/duvo-sandstorm.svg)](https://pypi.org/project/duvo-sandstorm/)
@@ -67,7 +67,8 @@ bot:       (paused thread sandbox resumed)
 ## Three things only OSS can do
 
 1. **Self-host**: runs on your Railway/Fly/K8s/Docker. Data stays in your network.
-   E2B is available self-hosted; Anthropic's Managed Agents are Anthropic-infra only.
+   The default E2B runtime is available self-hosted; Anthropic's Managed Agents are
+   Anthropic-infra only.
 2. **Every LLM**: Anthropic direct, OpenRouter (GPT-5, Gemini, DeepSeek, Qwen, Kimi,
    Grok), Vertex AI, Bedrock, Azure Foundry, any OpenAI-compatible base URL.
 3. **Your observability**: OTel export to [Langfuse](docs/observability.md),
@@ -83,7 +84,7 @@ bot:       (paused thread sandbox resumed)
 | Multi-provider (not just Claude) | ✅   |           ❌           |             ✅            |           ❌           |
 | OTel traces to any backend |     ✅     |           ❌           |             ❌            |           ❌           |
 | OSS license                |   MIT     |        Proprietary    |        Apache templates  |          MIT          |
-| Ships a TypeScript client  |     ✅     |           ✅           |             ✅            |           ❌           |
+| Runtime client source in repo | ✅  |           ❌           |             ✅            |           ❌           |
 | Session resume + replay    |     ✅     |           ✅           |             ❌            |           ❌           |
 
 Full side-by-side in [docs/comparison.md](docs/comparison.md);
@@ -121,9 +122,9 @@ Once installed:
 - Reaction triggers: add an emoji to any message to fire an agent (v0.9.1, see [docs/triggers.md](docs/triggers.md))
 - App Home tab shows memories, active runs, channel defaults, and triggers (v0.9.1)
 
-Thread continuity is real: each thread keeps its own paused E2B sandbox, so uploaded files,
-generated outputs, and installed packages survive across messages, even across server restarts.
-See [docs/memory.md](docs/memory.md).
+Thread continuity is real: each thread keeps its own paused sandbox on the configured runtime,
+E2B by default, so uploaded files, generated outputs, and installed packages survive across
+messages, even across server restarts. See [docs/memory.md](docs/memory.md).
 
 ## Triggers (v0.9.1)
 
@@ -196,7 +197,8 @@ pip install "duvo-sandstorm[slack]"           # Slack bot
 pip install "duvo-sandstorm[telemetry]"       # OpenTelemetry
 ```
 
-TypeScript client: `npm install @duvo/sandstorm-client` (see [clients/typescript](clients/typescript)).
+TypeScript client source lives in [clients/typescript](clients/typescript/README.md) for
+repo-local workspace usage. It is not published to npm.
 
 ## Deploy
 
@@ -215,7 +217,7 @@ TypeScript client: `npm install @duvo/sandstorm-client` (see [clients/typescript
 - [Memory: `/remember`, `/forget`, persistence guarantees](docs/memory.md)
 - [Replay](docs/replay.md)
 - [Python client](docs/client.md) · [TypeScript client](clients/typescript/README.md)
-- [Configuration](docs/config.md) · [API reference](docs/api.md)
+- [Configuration](docs/configuration.md) · [API reference](docs/api.md)
 - [Slack bot](docs/slack.md) · [Deployment](docs/deployment.md) · [OpenRouter](docs/openrouter.md)
 
 ## Community

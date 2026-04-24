@@ -2,6 +2,12 @@
 
 All notable changes to Sandstorm will be documented in this file.
 
+## [Unreleased]
+
+### Documentation
+
+- document runtime provider and local TypeScript client
+
 ## [0.9.2] - 2026-04-17
 
 ### Bug Fixes

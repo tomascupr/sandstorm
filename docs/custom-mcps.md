@@ -85,10 +85,10 @@ uvx will fetch + run the package on demand. Make sure your deployment has
 
 ## Trust boundary
 
-`sandstorm.json` controls which MCP servers spin up inside your E2B sandbox.
-A malicious or buggy MCP package has the same access to the sandbox
-environment as the agent does: filesystem, network (subject to E2B's
-network policies), and whatever env vars you pass through.
+`sandstorm.json` controls which MCP servers spin up inside your configured sandbox runtime.
+A malicious or buggy MCP package has the same access to the sandbox environment as the agent
+does: filesystem, network (subject to the runtime provider's policies), and whatever env vars
+you pass through.
 
 Treat `ds add --custom <untrusted-package>` like `pip install` from an
 untrusted source. In practice:
