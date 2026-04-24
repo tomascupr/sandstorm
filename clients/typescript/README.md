@@ -1,23 +1,30 @@
-# @duvo/sandstorm-client
+# Sandstorm TypeScript client source
 
-Thin TypeScript client for the [Sandstorm](https://github.com/tomascupr/sandstorm)
-agent runtime, stream agent runs over SSE, list prior runs, check health.
-Zero runtime dependencies (uses global `fetch`).
+Thin repo-local TypeScript client source for the [Sandstorm](https://github.com/tomascupr/sandstorm)
+agent runtime: stream agent runs over SSE, list prior runs, and check health. Zero runtime
+dependencies (uses global `fetch`).
 
-## Install
+This package is private and intended for source/workspace usage from this repository. It is
+not published to npm.
+
+Requires Node 18+ or any runtime with a global `fetch`.
+
+## Local usage
 
 ```bash
-npm install @duvo/sandstorm-client
-# or
-pnpm add @duvo/sandstorm-client
+cd clients/typescript
+npm install
+npm run build
+ds serve
+npm exec -- tsx examples/chat.ts "your prompt here"
 ```
-
-Requires Node 18+ (or any runtime with a global `fetch`).
 
 ## Quick start
 
+From code inside `clients/typescript`, import the source entry point directly:
+
 ```ts
-import { SandstormClient } from "@duvo/sandstorm-client";
+import { SandstormClient } from "./src/index.js";
 
 const client = new SandstormClient({
   baseUrl: "http://localhost:8000",
@@ -61,12 +68,12 @@ Mirrors `GET /health`.
 
 ## Types
 
-All request and response types are re-exported from the entry point 
+All request and response types are re-exported from the entry point
 `QueryRequest`, `Run`, `SSEEvent`, `HealthResponse`, `ClientOptions`.
 
 ## Examples
 
-See `examples/chat.ts` for a minimal CLI-style example.
+See `examples/chat.ts` for a minimal CLI-style example that runs from this workspace.
 
 ## License
 

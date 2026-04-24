@@ -1,6 +1,9 @@
 # Deployment Guide
 
-Core query execution in Sandstorm is stateless: each request creates an independent E2B sandbox, runs the agent, and tears it down. That makes concurrent agent runs straightforward. Two convenience features are still process-local by default: dashboard run history (`.sandstorm/runs.jsonl`) and Slack thread sandbox reuse.
+Core query execution in Sandstorm is stateless: each request creates an independent sandbox
+with the configured runtime, E2B by default, runs the agent, and tears it down. That makes
+concurrent agent runs straightforward. Two convenience features are still process-local by
+default: dashboard run history (`.sandstorm/runs.jsonl`) and Slack thread sandbox reuse.
 
 ## Production Server
 
@@ -59,10 +62,12 @@ All four agents run simultaneously in isolated sandboxes. They can't see each ot
 
 ## Scaling
 
-The Sandstorm server does almost no work itself -- it just proxies between your client and E2B. The real compute happens in E2B's cloud VMs. This means:
+The Sandstorm server does almost no work itself -- it proxies between your client and the
+configured sandbox runtime. With the default E2B runtime, the real compute happens in E2B's
+cloud VMs. This means:
 
 - **Horizontal scaling** -- run multiple Sandstorm instances behind a load balancer. No shared state to worry about.
-- **Bottleneck is E2B** -- your concurrent sandbox limit depends on your [E2B plan](https://e2b.dev/pricing). The free tier allows a handful; paid plans scale higher.
+- **Default-runtime bottleneck is E2B** -- your concurrent sandbox limit depends on your [E2B plan](https://e2b.dev/pricing). The free tier allows a handful; paid plans scale higher.
 - **CPU/memory on the server is minimal** -- each request holds an open SSE connection and streams stdout. A single 2-core machine can comfortably handle dozens of concurrent agents.
 
 ## Process-Local Features

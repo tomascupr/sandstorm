@@ -24,7 +24,28 @@ Drop a `sandstorm.json` file in your project root.
 | `skills_dir` | `string` | Directory containing Claude Code skills |
 | `allowed_tools` | `string[]` | Restrict the runtime to a subset of tools |
 | `template_skills` | `boolean` | Set `true` when required skills are already baked into the sandbox template |
-| `webhook_url` | `string` | Public URL for E2B lifecycle webhooks |
+| `runtime` | `object` | Sandbox runtime provider selection |
+| `webhook_url` | `string` | Public URL for E2B runtime lifecycle webhooks |
+
+## Runtime provider
+
+`runtime` selects where Sandstorm runs tools, files, commands, MCP servers, and agent work.
+The initial shape is:
+
+```json
+{
+  "runtime": {
+    "provider": "e2b"
+  }
+}
+```
+
+If `runtime` is omitted, Sandstorm defaults to E2B. Today `e2b` is the only runtime provider
+that ships with Sandstorm.
+
+**Runtime provider vs model provider:** `runtime.provider` controls where tools, files, and
+commands run. Model provider remains Anthropic, OpenRouter, Vertex AI, Bedrock, Azure Foundry,
+or a custom Anthropic-compatible proxy.
 
 ## Recommended customization model
 
@@ -166,7 +187,7 @@ For OpenRouter specifics, see the dedicated [OpenRouter guide](openrouter.md).
 
 ## Webhooks
 
-Set `webhook_url` in `sandstorm.json` to receive E2B sandbox lifecycle events:
+Set `webhook_url` in `sandstorm.json` to receive E2B runtime sandbox lifecycle events:
 
 ```json
 {
@@ -174,7 +195,9 @@ Set `webhook_url` in `sandstorm.json` to receive E2B sandbox lifecycle events:
 }
 ```
 
-When this field is configured, Sandstorm registers the webhook on server startup and deregisters it on shutdown.
+When this field is configured, Sandstorm registers the webhook on server startup and deregisters it
+on shutdown. These lifecycle webhook helpers are E2B-only and apply when
+`runtime.provider` is `e2b` or omitted.
 
 You can also manage webhooks from the CLI:
 

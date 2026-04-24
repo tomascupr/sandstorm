@@ -16,7 +16,7 @@ Where Sandstorm differs:
 | --------------------------- | -------------------------------------------------- | ---------------------------------------- |
 | Runtime location            | Your infra (Railway / Fly / K8s / Docker / laptop) | Anthropic's infra only                   |
 | Models                      | Anthropic, OpenRouter, Vertex, Bedrock, Azure, any OpenAI-compatible base URL | Claude only                              |
-| Sandbox provider            | E2B (self-host or hosted)                          | Anthropic-operated                       |
+| Sandbox provider            | Configured runtime; E2B ships today                | Anthropic-operated                       |
 | Chat integration            | Slack bot in the repo                              | No chat wrappers                         |
 | Data flow                   | Everything stays in your network                   | Runtime traffic goes through Anthropic   |
 | Observability               | OTel → Langfuse / Phoenix / Langsmith / any OTLP   | Anthropic console only                   |
@@ -40,7 +40,7 @@ Where Sandstorm differs:
 | -------------------------- | -------------------------------------- | -------------------------------------- |
 | Language                   | Python (FastAPI)                       | TypeScript (Next.js)                   |
 | Deploy target              | Anywhere that runs Python              | Tight Vercel + Workflow DevKit coupling |
-| Sandbox                    | E2B (per-thread, paused between messages) | Vercel Sandbox                          |
+| Sandbox                    | Configured runtime; E2B ships today      | Vercel Sandbox                          |
 | Observability              | OTel to any backend                    | Vercel-native                           |
 | Replay & run archive       | Built in. `ds replay <run_id>`        | Not part of the template               |
 | Memory                     | JSONL, per (team_id, user_id)          | DIY                                    |
@@ -66,7 +66,7 @@ Where Sandstorm differs:
 
 | Axis                       | Sandstorm                         | Local-daemon Slack bots        |
 | -------------------------- | --------------------------------- | ------------------------------ |
-| Where the agent runs       | Fresh E2B sandbox per thread      | Your laptop / a single daemon  |
+| Where the agent runs       | Fresh sandbox per thread; E2B by default | Your laptop / a single daemon |
 | Blast radius of a bad prompt | Sandboxed, tear down or pause   | Whatever that laptop can reach |
 | Multi-user concurrency     | Per-thread sandbox pool           | Serialized via one process     |
 | Production deployment      | Docker / Railway / self-host      | "Keep my laptop on"            |

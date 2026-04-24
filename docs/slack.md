@@ -145,7 +145,7 @@ or reinstall from the Slack app dashboard manually.
 | `SLACK_APP_TOKEN` | Yes (Socket Mode) | -- | App-level token (`xapp-...`) for Socket Mode |
 | `SLACK_SIGNING_SECRET` | Yes (HTTP mode) | -- | Signing secret for request verification in HTTP mode |
 | `ANTHROPIC_API_KEY` | Yes* | -- | Anthropic API key (or use OpenRouter) |
-| `E2B_API_KEY` | Yes | -- | E2B sandbox API key |
+| `E2B_API_KEY` | Yes for E2B runtime | -- | Default E2B sandbox runtime API key |
 | `OPENROUTER_API_KEY` | No | -- | OpenRouter key (if using OpenRouter) |
 
 *Or equivalent provider key, see [configuration](configuration.md#providers) for provider setup.

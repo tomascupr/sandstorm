@@ -39,7 +39,7 @@ proprietary file formats.
 ## What Sandstorm is not
 
 - Not a hosted SaaS (today). There's no `sandstorm.cloud` tier, deploy it
-  yourself. See [deploy/README.md](../deploy/README.md) for paths.
+  yourself. See the [deployment guide](deployment.md) for paths.
 - Not a Langchain / LangGraph / CrewAI competitor. It uses the Claude Agent
   SDK for orchestration and focuses on the runtime + Slack + memory + replay
   layer above it.
