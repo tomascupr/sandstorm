@@ -15,37 +15,23 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from .memory import memory_store
-from .models import QueryRequest
 from .sandbox import run_agent_in_sandbox
 from .store import build_config_snapshot, run_store
+from .platform import (
+    BINARY_MIME_PREFIXES as _BINARY_MIME_PREFIXES,
+    MAX_FILE_SIZE as _MAX_FILE_SIZE,
+    build_query_request as _build_query_request,
+    gather_thread_context as _gather_thread_context,
+    unique_filename as _unique_filename,
+)
 
 if TYPE_CHECKING:
     from slack_bolt.async_app import AsyncApp
 
 logger = logging.getLogger(__name__)
 
-# Max file size to download from Slack threads (50 MB)
-_MAX_FILE_SIZE = 50 * 1024 * 1024
-
 # Max sandbox pool entries (one per active thread)
 _MAX_SANDBOX_POOL = 1000
-
-# MIME prefixes treated as binary (downloaded as bytes, not text)
-_BINARY_MIME_PREFIXES = (
-    "image/",
-    "audio/",
-    "video/",
-    "application/pdf",
-    "application/zip",
-    "application/vnd.openxmlformats-",  # .xlsx, .docx, .pptx
-    "application/vnd.ms-",  # legacy .xls, .doc, .ppt
-    "application/msword",  # legacy .doc alternative
-    "application/x-7z-compressed",
-    "application/x-rar-compressed",
-    "application/x-tar",
-    "application/gzip",
-    "application/octet-stream",  # generic binary fallback
-)
 
 
 # ── Metadata blocks ──────────────────────────────────────────────────────────
@@ -97,41 +83,6 @@ def _build_metadata_blocks(
         }
     )
     return blocks
-
-
-# ── Query builder ─────────────────────────────────────────────────────────────
-
-
-def _build_query_request(
-    prompt: str,
-    files: dict[str, str] | None = None,
-    team_id: str | None = None,
-    user_id: str | None = None,
-    model: str | None = None,
-    channel_id: str | None = None,
-) -> QueryRequest:
-    """Build QueryRequest from prompt, deferring model/timeout to sandstorm.json.
-
-    When team_id/user_id/channel_id are passed, the server-side memory
-    injection in config._build_agent_config scopes the three-level memory
-    (team + channel + user) appropriately.
-
-    API keys resolved by QueryRequest.resolve_api_keys() as usual.
-    """
-    return QueryRequest(
-        prompt=prompt,
-        model=model,
-        timeout=None,
-        files=files,
-        output_format={},  # Slack is conversational — skip structured output
-        anthropic_api_key=None,
-        e2b_api_key=None,
-        openrouter_api_key=None,
-        max_turns=None,
-        team_id=team_id,
-        user_id=user_id,
-        channel_id=channel_id,
-    )
 
 
 # ── Thread helpers ────────────────────────────────────────────────────────────
@@ -186,63 +137,7 @@ async def _resolve_user_names(client, messages: list[dict], bot_user_id: str) ->
     return dict(results)
 
 
-def _gather_thread_context(
-    messages: list[dict], bot_user_id: str, *, user_names: dict[str, str] | None = None
-) -> str:
-    """Format thread messages into a context string.
-
-    Includes bot's own messages (prefixed [Sandstorm]) for conversational
-    continuity. Includes file names/types for user messages.
-    Returns formatted string like:
-      [Alice] Hey, this CSV has duplicate rows...
-      [Alice] [attached: data.csv (text/csv, 15KB)]
-      [Bob] @Sandstorm deduplicate this CSV...
-      [Sandstorm] Here's my analysis of the data...
-    """
-    lines: list[str] = []
-    for msg in messages:
-        user = msg.get("user", "unknown")
-        text = msg.get("text", "").strip()
-
-        # Include bot's own messages for conversational continuity
-        if user == bot_user_id:
-            if text:
-                lines.append(f"[Sandstorm] {text}")
-            continue  # skip file attachments from bot
-
-        display = user_names.get(user, user) if user_names else user
-
-        if text:
-            lines.append(f"[{display}] {text}")
-
-        # Note attached files
-        for f in msg.get("files", []):
-            name = f.get("name", "unknown")
-            mimetype = f.get("mimetype", "unknown")
-            size = f.get("size", 0)
-            size_kb = size / 1024
-            lines.append(f"[{display}] [attached: {name} ({mimetype}, {size_kb:.0f}KB)]")
-
-    return "\n".join(lines)
-
-
 # ── File handling ─────────────────────────────────────────────────────────────
-
-
-def _unique_filename(name: str, seen: set[str]) -> str:
-    """Return a unique filename, appending _1, _2, etc. for duplicates."""
-    if name not in seen:
-        seen.add(name)
-        return name
-    stem, dot, ext = name.rpartition(".")
-    if not dot:
-        stem, ext = name, ""
-    for i in range(1, 100):
-        candidate = f"{stem}_{i}.{ext}" if ext else f"{stem}_{i}"
-        if candidate not in seen:
-            seen.add(candidate)
-            return candidate
-    return name  # fallback
 
 
 async def _download_thread_files(
