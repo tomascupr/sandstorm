@@ -1015,3 +1015,24 @@ class TestReplay:
         assert "Replay report" in result.output
         assert "orig-1" in result.output
         assert "claude-haiku-4-5-20251001" in result.output
+
+
+class TestGChatCLI:
+    def test_gchat_group_exists(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+        runner = CliRunner()
+        result = runner.invoke(cli, ["gchat", "--help"])
+        assert result.exit_code == 0
+        assert "setup" in result.output
+        assert "start" in result.output
+        assert "verify" in result.output
+        assert "test" in result.output
+
+    def test_gchat_verify_without_config(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+        monkeypatch.delenv("GOOGLE_CHAT_SERVICE_ACCOUNT_KEY", raising=False)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["gchat", "verify"])
+        assert result.exit_code != 0
