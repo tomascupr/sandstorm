@@ -270,6 +270,14 @@ try:
 except ImportError:
     pass
 
+# Mount Google Chat events endpoint (requires `pip install "duvo-sandstorm[gchat]"`)
+try:
+    from .gchat_routes import router as gchat_router
+
+    app.include_router(gchat_router)
+except ImportError:
+    pass
+
 
 _DASHBOARD_HTML = (Path(__file__).parent / "dashboard.html").read_text()
 
