@@ -214,3 +214,17 @@ class TestGChatThreadContext:
         result = gather_thread_context(messages, "BOT_ID")
         assert "[users/123] Help with this" in result
         assert "[Sandstorm] Working on it..." in result
+
+
+from sandstorm.gchat import unicode_to_shortcode
+
+
+class TestEmojiNormalization:
+    def test_common_emoji_mapping(self):
+        assert unicode_to_shortcode("\U0001f440") == "eyes"
+        assert unicode_to_shortcode("\U0001f44d") == "+1"
+        assert unicode_to_shortcode("\U0001f44e") == "-1"
+        assert unicode_to_shortcode("\U0001f680") == "rocket"
+
+    def test_unknown_emoji_returns_none(self):
+        assert unicode_to_shortcode("\U0001f999") is None

@@ -12,6 +12,25 @@ from .store import run_store
 
 logger = logging.getLogger(__name__)
 
+_UNICODE_TO_SHORTCODE = {
+    "\U0001f440": "eyes",
+    "\U0001f44d": "+1",
+    "\U0001f44e": "-1",
+    "\U0001f680": "rocket",
+    "✅": "white_check_mark",
+    "❌": "x",
+    "\U0001f525": "fire",
+    "\U0001f4a1": "bulb",
+    "\U0001f6a8": "rotating_light",
+    "\U0001f3af": "dart",
+    "\U0001f50d": "mag",
+    "\U0001f4dd": "memo",
+}
+
+
+def unicode_to_shortcode(emoji: str) -> str | None:
+    return _UNICODE_TO_SHORTCODE.get(emoji)
+
 
 def parse_event_type(body: dict) -> str:
     """Determine the event type from a Google Chat event payload."""

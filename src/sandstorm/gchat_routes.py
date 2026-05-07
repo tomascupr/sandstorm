@@ -65,6 +65,9 @@ async def _dispatch_event(body: dict) -> dict:
     if event_type == "card_clicked":
         return await _handle_card_clicked(body)
 
+    if event_type == "reaction_added":
+        return await _handle_reaction(body)
+
     # MESSAGE events (mention, dm_message) will be handled in a later task
     # when the full agent run pipeline is wired up.
 
@@ -106,6 +109,43 @@ async def _handle_card_clicked(body: dict) -> dict:
         return {"text": "Memory forgotten."}
 
     return {}
+
+
+async def _handle_reaction(body: dict) -> dict:
+    """Handle REACTION_ADDED events — match against triggers."""
+    from .config import load_sandstorm_config
+    from .gchat import unicode_to_shortcode
+    from .triggers import load_triggers, render_prompt
+
+    emoji_unicode = body.get("reaction", {}).get("unicode", "")
+    shortcode = unicode_to_shortcode(emoji_unicode)
+    if not shortcode:
+        return {}
+
+    message = body.get("message", {})
+    space_name = body.get("space", {}).get("name", "")
+
+    config = load_sandstorm_config()
+    if config is None:
+        return {}
+    try:
+        triggers = load_triggers(config)
+    except ValueError:
+        return {}
+
+    matches = [
+        t
+        for t in triggers
+        if t.type == "reaction"
+        and t.emoji == shortcode
+        and (not t.channels or space_name in t.channels)
+    ]
+    if not matches:
+        return {}
+
+    # Reaction triggers will fire agent runs in a future task
+    # For now, acknowledge the trigger match
+    return {"text": f"Trigger matched: {matches[0].name}"}
 
 
 @router.post("/gchat/events")
