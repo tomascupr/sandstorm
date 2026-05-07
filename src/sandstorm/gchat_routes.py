@@ -40,12 +40,46 @@ def _verify_google_chat_jwt(auth_header: str) -> bool:
 
 async def _dispatch_event(body: dict) -> dict:
     """Route a Google Chat event to the appropriate handler."""
-    event_type = body.get("type", "")
+    from .gchat import dispatch_slash_command, parse_event_type
 
-    if event_type == "ADDED_TO_SPACE":
+    event_type = parse_event_type(body)
+
+    if event_type == "added_to_space":
         return {
             "text": "Hi! I'm Sandstorm — I run general-purpose agent tasks in secure sandboxes. "
             "Mention me or DM me with a task!"
+        }
+
+    if event_type == "slash_command":
+        user_name = body.get("user", {}).get("name", "")
+        space_name = body.get("space", {}).get("name", "")
+        return dispatch_slash_command(body, team_id=space_name, user_id=user_name)
+
+    if event_type == "card_clicked":
+        return await _handle_card_clicked(body)
+
+    # MESSAGE events (mention, dm_message) will be handled in a later task
+    # when the full agent run pipeline is wired up.
+
+    return {}
+
+
+async def _handle_card_clicked(body: dict) -> dict:
+    """Handle interactive card button clicks (e.g. feedback)."""
+    action = body.get("action", {})
+    method = action.get("actionMethodName", "")
+    params = {p["key"]: p["value"] for p in action.get("parameters", [])}
+
+    if method == "sandstorm_feedback":
+        from .store import run_store
+
+        run_id = params.get("run_id", "")
+        sentiment = params.get("sentiment", "")
+        user = body.get("user", {}).get("name", "")
+        if run_id and sentiment:
+            run_store.set_feedback(run_id, sentiment, user)
+        return {
+            "text": f"{'\U0001f44d' if sentiment == 'positive' else '\U0001f44e'} Feedback recorded. Thanks!"
         }
 
     return {}

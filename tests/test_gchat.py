@@ -6,7 +6,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from sandstorm.gchat import GChatStreamer
+from sandstorm.gchat import (
+    GChatStreamer,
+    build_metadata_cards,
+    dispatch_slash_command,
+    parse_event_type,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -56,3 +61,117 @@ class TestGChatStreamer:
         cards = [{"cardId": "meta", "card": {"sections": []}}]
         asyncio.run(streamer.stop(blocks=cards))
         assert streamer._accumulated == "Done"
+
+
+class TestParseEventType:
+    def test_added_to_space(self):
+        assert parse_event_type({"type": "ADDED_TO_SPACE"}) == "added_to_space"
+
+    def test_message_with_slash_command(self):
+        body = {"type": "MESSAGE", "message": {"slashCommand": {"commandId": "1"}}}
+        assert parse_event_type(body) == "slash_command"
+
+    def test_message_in_dm(self):
+        body = {"type": "MESSAGE", "space": {"type": "DM"}, "message": {"text": "hi"}}
+        assert parse_event_type(body) == "dm_message"
+
+    def test_message_with_mention(self):
+        body = {"type": "MESSAGE", "space": {"type": "ROOM"}, "message": {"text": "@bot help"}}
+        assert parse_event_type(body) == "mention"
+
+    def test_card_clicked(self):
+        body = {"type": "CARD_CLICKED", "action": {"actionMethodName": "feedback"}}
+        assert parse_event_type(body) == "card_clicked"
+
+    def test_app_home(self):
+        assert parse_event_type({"type": "APP_HOME"}) == "app_home"
+
+    def test_reaction_added(self):
+        assert parse_event_type({"type": "REACTION_ADDED"}) == "reaction_added"
+
+    def test_unknown(self):
+        assert parse_event_type({"type": "SOMETHING_ELSE"}) == "unknown"
+
+
+class TestBuildMetadataCards:
+    def test_returns_cards_v2_format(self):
+        cards = build_metadata_cards("run1", "sonnet", 0.01, 3, 12.5)
+        assert isinstance(cards, list)
+        assert len(cards) > 0
+        assert "cardId" in cards[0]
+        assert "card" in cards[0]
+
+    def test_includes_feedback_buttons(self):
+        cards = build_metadata_cards("run1", "sonnet", 0.01, 3, 12.5)
+        sections = cards[0]["card"]["sections"]
+        buttons_found = False
+        for section in sections:
+            for widget in section.get("widgets", []):
+                if "buttonList" in widget:
+                    buttons_found = True
+                    buttons = widget["buttonList"]["buttons"]
+                    assert len(buttons) == 2
+        assert buttons_found
+
+    def test_includes_metadata_text(self):
+        cards = build_metadata_cards("run1", "sonnet", 0.01, 3, 12.5)
+        sections = cards[0]["card"]["sections"]
+        text_found = False
+        for section in sections:
+            for widget in section.get("widgets", []):
+                if "textParagraph" in widget:
+                    text = widget["textParagraph"]["text"]
+                    assert "sonnet" in text
+                    assert "0.0100" in text
+                    text_found = True
+        assert text_found
+
+
+class TestDispatchSlashCommand:
+    def test_remember_command(self, tmp_path):
+        from sandstorm.memory import MemoryStore
+
+        store = MemoryStore(path=tmp_path / "mem.jsonl")
+        body = {
+            "message": {"slashCommand": {"commandId": "1"}, "argumentText": "likes coffee"},
+            "user": {"name": "users/123"},
+            "space": {"name": "spaces/abc"},
+        }
+        with patch("sandstorm.gchat.memory_store", store):
+            result = dispatch_slash_command(body, team_id="T1", user_id="U1")
+        assert "Remembered" in result["text"]
+
+    def test_memories_command_empty(self, tmp_path):
+        from sandstorm.memory import MemoryStore
+
+        store = MemoryStore(path=tmp_path / "mem.jsonl")
+        body = {
+            "message": {"slashCommand": {"commandId": "5"}, "argumentText": ""},
+            "user": {"name": "users/123"},
+            "space": {"name": "spaces/abc"},
+        }
+        with patch("sandstorm.gchat.memory_store", store):
+            result = dispatch_slash_command(body, team_id="T1", user_id="U1")
+        assert "No memories" in result["text"]
+
+    def test_forget_command_no_match(self, tmp_path):
+        from sandstorm.memory import MemoryStore
+
+        store = MemoryStore(path=tmp_path / "mem.jsonl")
+        body = {
+            "message": {"slashCommand": {"commandId": "4"}, "argumentText": "nonexistent"},
+            "user": {"name": "users/123"},
+            "space": {"name": "spaces/abc"},
+        }
+        with patch("sandstorm.gchat.memory_store", store):
+            result = dispatch_slash_command(body, team_id="T1", user_id="U1")
+        assert "No memory matched" in result["text"]
+
+    def test_unknown_command(self):
+        body = {
+            "message": {"slashCommand": {"commandId": "99"}, "argumentText": ""},
+            "user": {"name": "users/123"},
+            "space": {"name": "spaces/abc"},
+        }
+        result = dispatch_slash_command(body, team_id="T1", user_id="U1")
+        assert "Unknown" in result["text"]
