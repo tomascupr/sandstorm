@@ -447,7 +447,7 @@ class TestStreamToSlack:
         request = _build_query_request("test prompt")
 
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             result = asyncio.run(
@@ -476,7 +476,7 @@ class TestStreamToSlack:
         set_status = AsyncMock()
 
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(
@@ -502,7 +502,7 @@ class TestStreamToSlack:
         request = _build_query_request("test")
 
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             result = asyncio.run(
@@ -540,7 +540,7 @@ class TestStreamToSlack:
         request = _build_query_request("test prompt")
 
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(
@@ -572,7 +572,7 @@ class TestStreamToSlack:
         set_status = AsyncMock()
 
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             result = asyncio.run(
@@ -663,7 +663,7 @@ class TestStreamToSlackSandboxParams:
 
         request = _build_query_request("test")
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(
@@ -691,7 +691,7 @@ class TestStreamToSlackSandboxParams:
 
         request = _build_query_request("test")
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(
@@ -721,7 +721,7 @@ class TestStreamToSlackSandboxParams:
         request = _build_query_request("test")
         sandbox_id_out: list[str] = []
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(
@@ -750,7 +750,7 @@ class TestStreamToSlackSandboxParams:
         request = _build_query_request("test")
         binary = {"photo.png": b"\x89PNG\r\n"}
         with (
-            patch("sandstorm.slack.run_agent_in_sandbox", gen),
+            patch("sandstorm.platform.run_agent_in_sandbox", gen),
             patch("sandstorm.slack.run_store", RunStore(path=tmp_path / "runs.jsonl")),
         ):
             asyncio.run(

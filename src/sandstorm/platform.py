@@ -7,8 +7,16 @@ Google Chat, and future chat platform adapters.
 from __future__ import annotations
 
 import asyncio
+import base64
+import contextlib
+import json
 import logging
+import time
+from collections.abc import Callable
+
 from .models import QueryRequest
+from .sandbox import run_agent_in_sandbox
+from .store import build_config_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -153,3 +161,203 @@ class SandboxPoolManager:
 
     def size(self) -> int:
         return len(self._pool)
+
+
+class StreamBridge:
+    """Consume run_agent_in_sandbox() events and dispatch to a streamer.
+
+    The streamer must implement:
+      async append(*, markdown_text: str) -> None
+      async stop(blocks: list[dict] | None = None) -> None
+    """
+
+    def __init__(self, streamer, *, run_store):
+        self._streamer = streamer
+        self._run_store = run_store
+
+    async def run(
+        self,
+        request,
+        run_id: str,
+        client,
+        channel: str,
+        thread_ts: str,
+        set_status: Callable | None = None,
+        *,
+        keep_alive: bool = False,
+        sandbox_id: str | None = None,
+        sandbox_id_out: list[str] | None = None,
+        binary_files: dict[str, bytes] | None = None,
+        build_footer: Callable | None = None,
+        upload_file: Callable | None = None,
+    ) -> dict:
+        metadata: dict = {
+            "model": None, "cost_usd": None, "num_turns": None,
+            "duration_secs": None, "error": None, "agent_session_id": None,
+        }
+        start = time.monotonic()
+        stopped = False
+        has_streamed_text = False
+
+        self._run_store.create(
+            id=run_id,
+            prompt=request.prompt,
+            model=request.model,
+            files_count=len(request.files) if request.files else 0,
+            raw_prompt=request.prompt,
+            team_id=request.team_id,
+            user_id=request.user_id,
+            channel_id=channel,
+            thread_ts=thread_ts,
+            sandbox_id=sandbox_id,
+            config_snapshot=build_config_snapshot({
+                "model": request.model,
+                "allowed_tools": request.allowed_tools,
+                "timeout": request.timeout,
+                "files": request.files,
+            }),
+        )
+
+        try:
+            async for line in run_agent_in_sandbox(
+                request, run_id, keep_alive=keep_alive,
+                sandbox_id=sandbox_id, sandbox_id_out=sandbox_id_out,
+                binary_files=binary_files,
+            ):
+                try:
+                    event = json.loads(line)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+
+                event_type = event.get("type")
+                logger.info("[%s] Event: %s", run_id, event_type)
+
+                if event_type == "system" and event.get("subtype") == "init":
+                    model = event.get("model")
+                    metadata["model"] = model
+                    metadata["agent_session_id"] = (
+                        event.get("session_id") or metadata["agent_session_id"]
+                    )
+                    if set_status:
+                        await set_status(f"Running agent on {model}...")
+
+                elif event_type == "assistant":
+                    message = event.get("message", {})
+                    for block in message.get("content", []):
+                        if block.get("type") == "text":
+                            text = block["text"]
+                            if text:
+                                prefix = "\n\n" if has_streamed_text else ""
+                                try:
+                                    await self._streamer.append(markdown_text=prefix + text)
+                                    has_streamed_text = True
+                                    logger.info("[%s] Streamed %d chars", run_id, len(text))
+                                except Exception:
+                                    logger.error("[%s] streamer.append failed", run_id, exc_info=True)
+                        elif block.get("type") == "tool_use":
+                            tool_name = block.get("name", "unknown")
+                            logger.info("[%s] Tool: %s", run_id, tool_name)
+                            if set_status:
+                                await set_status(f"Using {tool_name}...")
+                            else:
+                                try:
+                                    await self._streamer.append(
+                                        markdown_text=f"\n_:hammer_and_wrench: {tool_name}_\n"
+                                    )
+                                    has_streamed_text = True
+                                except Exception:
+                                    logger.error(
+                                        "[%s] streamer.append (tool crumb) failed",
+                                        run_id, exc_info=True,
+                                    )
+
+                elif event_type == "result":
+                    cost = event.get("total_cost_usd")
+                    metadata["cost_usd"] = cost if cost is not None else event.get("cost_usd")
+                    metadata["num_turns"] = event.get("num_turns")
+                    metadata["duration_secs"] = round(time.monotonic() - start, 1)
+                    metadata["model"] = event.get("model") or metadata["model"]
+                    logger.info(
+                        "[%s] Result: turns=%s cost=%s",
+                        run_id, metadata["num_turns"], metadata["cost_usd"],
+                    )
+
+                    footer_blocks = build_footer(run_id, metadata) if build_footer else None
+                    try:
+                        await self._streamer.stop(blocks=footer_blocks)
+                        stopped = True
+                        logger.info("[%s] Stream stopped with footer", run_id)
+                    except Exception:
+                        logger.error("[%s] streamer.stop failed", run_id, exc_info=True)
+
+                    metadata["agent_session_id"] = (
+                        event.get("session_id") or metadata["agent_session_id"]
+                    )
+                    if metadata["agent_session_id"] is None:
+                        logger.info(
+                            "[%s] No agent_session_id captured — next thread message "
+                            "will not resume the session",
+                            run_id,
+                        )
+                    self._run_store.complete(
+                        run_id,
+                        cost_usd=metadata["cost_usd"],
+                        num_turns=metadata["num_turns"],
+                        duration_secs=metadata["duration_secs"],
+                        model=metadata["model"],
+                        agent_session_id=metadata["agent_session_id"],
+                    )
+
+                elif event_type == "error":
+                    error_msg = event.get("error", "Unknown error")
+                    metadata["error"] = error_msg
+                    metadata["duration_secs"] = round(time.monotonic() - start, 1)
+                    logger.error("[%s] Agent error: %s", run_id, error_msg)
+
+                    try:
+                        await self._streamer.append(markdown_text=f"\n:warning: Error: {error_msg}")
+                        await self._streamer.stop()
+                        stopped = True
+                    except Exception:
+                        logger.error("[%s] streamer.stop (error) failed", run_id, exc_info=True)
+
+                    self._run_store.fail(run_id, error_msg, metadata["duration_secs"])
+
+                elif event_type == "file":
+                    file_name = event.get("name", "file")
+                    file_title = event.get("relative_path") or file_name
+                    file_data_b64 = event.get("data")
+                    if file_data_b64 and upload_file:
+                        try:
+                            file_data = base64.b64decode(file_data_b64)
+                            await upload_file(
+                                channel=channel,
+                                thread_ts=thread_ts,
+                                content=file_data,
+                                filename=file_name,
+                                title=file_title,
+                            )
+                            logger.info(
+                                "[%s] Uploaded file %s (%d bytes)",
+                                run_id, file_title, len(file_data),
+                            )
+                        except Exception:
+                            logger.error(
+                                "[%s] Failed to upload %s",
+                                run_id, file_name, exc_info=True,
+                            )
+
+                elif event_type in ("user", "stderr", "warning"):
+                    logger.debug("[%s] %s", run_id, event_type)
+
+        except Exception as exc:
+            metadata["error"] = str(exc)
+            metadata["duration_secs"] = round(time.monotonic() - start, 1)
+            logger.error("[%s] Stream error: %s", run_id, exc, exc_info=True)
+            self._run_store.fail(run_id, str(exc), metadata["duration_secs"])
+        finally:
+            if not stopped:
+                with contextlib.suppress(Exception):
+                    await self._streamer.stop()
+
+        return metadata

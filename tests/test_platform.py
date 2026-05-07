@@ -1,5 +1,9 @@
 """Tests for the shared platform core (platform.py)."""
 
+import asyncio
+import json
+from unittest.mock import AsyncMock, patch
+
 from sandstorm.platform import (
     build_query_request,
     gather_thread_context,
@@ -86,6 +90,56 @@ class TestUniqueFilename:
 
 import asyncio
 from sandstorm.platform import SandboxPoolManager
+
+
+class TestStreamBridge:
+    def _make_async_generator(self, events: list[str]):
+        async def gen(request, request_id="", **kwargs):
+            for event in events:
+                yield event
+        return gen
+
+    def test_assistant_text_dispatched(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+        from sandstorm.platform import StreamBridge
+        events = [
+            json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}}),
+            json.dumps({"type": "result", "subtype": "end_turn", "num_turns": 1, "total_cost_usd": 0.01, "model": "sonnet"}),
+        ]
+        gen = self._make_async_generator(events)
+        streamer = AsyncMock()
+        streamer.append = AsyncMock()
+        streamer.stop = AsyncMock()
+        from sandstorm.store import RunStore
+        request = build_query_request("test")
+        bridge = StreamBridge(streamer, run_store=RunStore(path=tmp_path / "runs.jsonl"))
+
+        with patch("sandstorm.platform.run_agent_in_sandbox", gen):
+            result = asyncio.run(bridge.run(request, "run1", AsyncMock(), "C001", "ts1"))
+
+        streamer.append.assert_called()
+        streamer.stop.assert_called()
+        assert result["model"] == "sonnet"
+        assert result["cost_usd"] == 0.01
+
+    def test_error_event_records_failure(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-key")
+        monkeypatch.setenv("E2B_API_KEY", "e2b-test-key")
+        from sandstorm.platform import StreamBridge
+        events = [json.dumps({"type": "error", "error": "Sandbox timeout"})]
+        gen = self._make_async_generator(events)
+        streamer = AsyncMock()
+        streamer.append = AsyncMock()
+        streamer.stop = AsyncMock()
+        from sandstorm.store import RunStore
+        request = build_query_request("test")
+        bridge = StreamBridge(streamer, run_store=RunStore(path=tmp_path / "runs.jsonl"))
+
+        with patch("sandstorm.platform.run_agent_in_sandbox", gen):
+            result = asyncio.run(bridge.run(request, "run2", AsyncMock(), "C001", "ts1"))
+
+        assert result["error"] == "Sandbox timeout"
 
 
 class TestSandboxPoolManager:
