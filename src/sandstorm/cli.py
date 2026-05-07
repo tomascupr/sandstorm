@@ -1668,3 +1668,243 @@ def _do_slack_start_socket() -> None:
     except KeyboardInterrupt as exc:
         click.echo("Interrupted.", err=True)
         raise SystemExit(130) from exc
+
+
+@cli.group()
+def gchat() -> None:
+    """Sandstorm Google Chat bot."""
+
+
+@gchat.command("setup")
+def gchat_setup() -> None:
+    """Interactive setup wizard — configures Google Chat integration."""
+    load_dotenv()
+
+    click.echo("\n  Sandstorm Google Chat Setup")
+    click.echo("  " + "-" * 28 + "\n")
+
+    # Step 1: Check for google-api-python-client
+    try:
+        import googleapiclient  # noqa: F401
+    except ImportError:
+        click.echo(
+            '  Error: Google Chat dependencies not installed.\n'
+            '  Run: pip install "duvo-sandstorm[gchat]"',
+            err=True,
+        )
+        raise SystemExit(1)
+
+    # Step 2: Service account key
+    click.echo("  Step 1: Service account credentials\n")
+    click.echo("  You need a GCP service account JSON key file.")
+    click.echo("  Create one at: https://console.cloud.google.com/iam-admin/serviceaccounts\n")
+
+    key_path = click.prompt("  Path to service account JSON key file", type=str).strip()
+    key_path_resolved = Path(key_path).resolve()
+    if not key_path_resolved.exists():
+        click.echo(f"  Error: File not found: {key_path_resolved}", err=True)
+        raise SystemExit(1)
+
+    # Validate it's valid JSON
+    import json as _json
+    try:
+        with open(key_path_resolved) as f:
+            key_data = _json.load(f)
+        if "client_email" not in key_data:
+            click.echo("  Warning: JSON key file doesn't look like a service account key.", err=True)
+    except _json.JSONDecodeError:
+        click.echo("  Error: File is not valid JSON.", err=True)
+        raise SystemExit(1)
+
+    # Step 3: Project number
+    click.echo("\n  Step 2: GCP project number\n")
+    click.echo("  Find it at: https://console.cloud.google.com → Project Info")
+    project_number = click.prompt("  GCP project number", type=str).strip()
+
+    # Step 4: Save to .env
+    env_path = str(Path.cwd() / ".env")
+    set_key(env_path, "GOOGLE_CHAT_SERVICE_ACCOUNT_KEY", str(key_path_resolved))
+    set_key(env_path, "GOOGLE_CHAT_PROJECT_NUMBER", project_number)
+    click.echo(
+        f"\n  Saved GOOGLE_CHAT_SERVICE_ACCOUNT_KEY and GOOGLE_CHAT_PROJECT_NUMBER to .env\n"
+    )
+
+    # Step 5: Chat API configuration instructions
+    click.echo("  Step 3: Configure the Chat API\n")
+    click.echo("  1. Go to: https://console.cloud.google.com/apis/api/chat.googleapis.com")
+    click.echo("  2. Enable the Google Chat API")
+    click.echo("  3. Go to Configuration tab and set:")
+    click.echo("     - HTTP endpoint URL: https://<your-server>/gchat/events")
+    click.echo("     - Enable interactive features")
+    click.echo("     - Add slash commands:")
+    click.echo("       /remember (ID: 1), /team_remember (ID: 2), /channel_remember (ID: 3),")
+    click.echo("       /forget (ID: 4), /memories (ID: 5), /model (ID: 6), /cancel (ID: 7)")
+    click.echo("     - Enable App Home")
+    click.echo()
+    click.echo("  Note: Google Chat requires an HTTPS endpoint (no socket mode).")
+    click.echo("  For development, use ngrok or cloudflared to tunnel.\n")
+
+    # Step 6: Test connectivity
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+
+        credentials = service_account.Credentials.from_service_account_file(
+            str(key_path_resolved),
+            scopes=["https://www.googleapis.com/auth/chat.bot"],
+        )
+        service = build("chat", "v1", credentials=credentials)
+        # A simple API call to verify the credentials work
+        service.spaces().list(pageSize=1).execute()
+        click.echo("  ✓ Service account credentials verified.\n")
+    except Exception as exc:
+        click.echo(f"  Warning: Could not verify credentials: {exc}", err=True)
+        click.echo("  The credentials may still work — verify after configuring the Chat API.\n")
+
+    click.echo("  Setup complete! Start with: ds gchat start\n")
+
+
+@gchat.command("verify")
+def gchat_verify() -> None:
+    """Preflight checks for Google Chat integration."""
+    load_dotenv()
+    import json as _json
+
+    checks: list[tuple[str, bool, str]] = []
+
+    # Check 1: Service account key
+    key_path = os.environ.get("GOOGLE_CHAT_SERVICE_ACCOUNT_KEY", "")
+    if not key_path:
+        checks.append(("GOOGLE_CHAT_SERVICE_ACCOUNT_KEY", False, "not set"))
+    elif not Path(key_path).exists():
+        checks.append(("Service account key file", False, f"not found: {key_path}"))
+    else:
+        try:
+            with open(key_path) as f:
+                key_data = _json.load(f)
+            if "client_email" in key_data:
+                checks.append(("Service account key", True, key_data["client_email"]))
+            else:
+                checks.append(("Service account key", False, "missing client_email"))
+        except Exception:
+            checks.append(("Service account key", False, "invalid JSON"))
+
+    # Check 2: Project number
+    project_number = os.environ.get("GOOGLE_CHAT_PROJECT_NUMBER", "")
+    if project_number:
+        checks.append(("GOOGLE_CHAT_PROJECT_NUMBER", True, project_number))
+    else:
+        checks.append(("GOOGLE_CHAT_PROJECT_NUMBER", False, "not set"))
+
+    # Check 3: Google API client
+    try:
+        import googleapiclient  # noqa: F401
+        checks.append(("google-api-python-client", True, "installed"))
+    except ImportError:
+        checks.append(("google-api-python-client", False, 'pip install "duvo-sandstorm[gchat]"'))
+
+    # Print results
+    click.echo("\n  Google Chat preflight\n")
+    all_pass = True
+    for name, passed, detail in checks:
+        icon = "✓" if passed else "✗"
+        click.echo(f"  {icon} {name}: {detail}")
+        if not passed:
+            all_pass = False
+
+    click.echo()
+    if not all_pass:
+        click.echo("  Some checks failed. Run `ds gchat setup` to configure.\n")
+        raise SystemExit(1)
+    click.echo("  All checks passed!\n")
+
+
+@gchat.command("start")
+@click.option("--host", default="0.0.0.0", help="Bind address.")
+@click.option("--port", "-p", default=3000, type=int, help="Bind port.")
+def gchat_start(host: str, port: int) -> None:
+    """Start the FastAPI server with Google Chat endpoint."""
+    load_dotenv()
+
+    if not os.environ.get("GOOGLE_CHAT_SERVICE_ACCOUNT_KEY"):
+        click.echo(
+            "Error: GOOGLE_CHAT_SERVICE_ACCOUNT_KEY not set.\n"
+            "Run `ds gchat setup` first.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format=_LOG_FORMAT,
+        datefmt=_LOG_DATEFMT,
+        stream=sys.stderr,
+    )
+
+    try:
+        import uvicorn
+        from .main import app
+
+        click.echo(f"Starting Sandstorm with Google Chat on {host}:{port}...")
+        uvicorn.run(app, host=host, port=port)
+    except ImportError as exc:
+        click.echo("Error: uvicorn not available.", err=True)
+        raise SystemExit(1) from exc
+    except KeyboardInterrupt as exc:
+        click.echo("Interrupted.", err=True)
+        raise SystemExit(130) from exc
+
+
+@gchat.command("test")
+@click.option("--space", required=True, help="Google Chat space name (e.g. spaces/AAAA_BBBB)")
+def gchat_test(space: str) -> None:
+    """Run live integration test against a Google Chat space."""
+    load_dotenv()
+
+    key_path = os.environ.get("GOOGLE_CHAT_SERVICE_ACCOUNT_KEY", "")
+    if not key_path:
+        click.echo("Error: GOOGLE_CHAT_SERVICE_ACCOUNT_KEY not set.", err=True)
+        raise SystemExit(1)
+
+    try:
+        from google.oauth2 import service_account
+        from googleapiclient.discovery import build
+    except ImportError:
+        click.echo('Error: pip install "duvo-sandstorm[gchat]"', err=True)
+        raise SystemExit(1)
+
+    click.echo(f"\n  Testing Google Chat integration in {space}\n")
+
+    # Step 1: Verify credentials
+    try:
+        credentials = service_account.Credentials.from_service_account_file(
+            key_path,
+            scopes=["https://www.googleapis.com/auth/chat.bot"],
+        )
+        service = build("chat", "v1", credentials=credentials)
+        click.echo("  ✓ Credentials valid")
+    except Exception as exc:
+        click.echo(f"  ✗ Credentials invalid: {exc}", err=True)
+        raise SystemExit(1)
+
+    # Step 2: Send test message
+    try:
+        result = service.spaces().messages().create(
+            parent=space,
+            body={"text": "🔧 Sandstorm integration test — this message will be deleted."},
+        ).execute()
+        msg_name = result.get("name", "")
+        click.echo("  ✓ Sent test message")
+    except Exception as exc:
+        click.echo(f"  ✗ Failed to send message: {exc}", err=True)
+        raise SystemExit(1)
+
+    # Step 3: Delete test message
+    if msg_name:
+        try:
+            service.spaces().messages().delete(name=msg_name).execute()
+            click.echo("  ✓ Deleted test message")
+        except Exception as exc:
+            click.echo(f"  ✗ Failed to delete test message: {exc}", err=True)
+
+    click.echo("\n  Integration test passed!\n")
