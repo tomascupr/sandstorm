@@ -175,3 +175,23 @@ class TestDispatchSlashCommand:
         }
         result = dispatch_slash_command(body, team_id="T1", user_id="U1")
         assert "Unknown" in result["text"]
+
+
+from sandstorm.gchat_app_home import build_home_card
+
+
+class TestGChatAppHome:
+    def test_builds_valid_card(self):
+        card = build_home_card(team_id="T1", user_id="U1")
+        assert "cardId" in card
+        assert "card" in card
+
+    def test_includes_header(self):
+        card = build_home_card(team_id="T1", user_id="U1")
+        header = card["card"].get("header", {})
+        assert "Sandstorm" in header.get("title", "")
+
+    def test_has_sections(self):
+        card = build_home_card(team_id="T1", user_id="U1")
+        sections = card["card"].get("sections", [])
+        assert len(sections) >= 1

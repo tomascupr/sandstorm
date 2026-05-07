@@ -55,6 +55,13 @@ async def _dispatch_event(body: dict) -> dict:
         space_name = body.get("space", {}).get("name", "")
         return dispatch_slash_command(body, team_id=space_name, user_id=user_name)
 
+    if event_type == "app_home":
+        from .gchat_app_home import build_home_card
+        user_name = body.get("user", {}).get("name", "")
+        space_name = body.get("space", {}).get("name", "")
+        card = build_home_card(team_id=space_name, user_id=user_name)
+        return {"cardsV2": [card]}
+
     if event_type == "card_clicked":
         return await _handle_card_clicked(body)
 
@@ -81,6 +88,22 @@ async def _handle_card_clicked(body: dict) -> dict:
         return {
             "text": f"{'\U0001f44d' if sentiment == 'positive' else '\U0001f44e'} Feedback recorded. Thanks!"
         }
+
+    if method == "sandstorm_cancel_run":
+        from .cancellation import request_cancellation
+        run_id = params.get("run_id", "")
+        if run_id:
+            request_cancellation(run_id)
+        return {"text": f"Cancelled run `{run_id}`."}
+
+    if method == "sandstorm_forget_memory":
+        from .memory import memory_store
+        memory_id = params.get("memory_id", "")
+        user = body.get("user", {}).get("name", "")
+        space = body.get("space", {}).get("name", "")
+        if memory_id:
+            memory_store.forget_by_id(memory_id, team_id=space, user_id=user, scope="user")
+        return {"text": "Memory forgotten."}
 
     return {}
 
