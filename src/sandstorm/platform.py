@@ -6,6 +6,7 @@ Google Chat, and future chat platform adapters.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from .models import QueryRequest
 
@@ -101,3 +102,54 @@ def unique_filename(name: str, seen: set[str]) -> str:
             seen.add(candidate)
             return candidate
     return name
+
+
+MAX_SANDBOX_POOL = 1000
+
+
+class SandboxPoolManager:
+    """Thread-safe sandbox reuse pool with LRU eviction."""
+
+    def __init__(self, max_size: int = MAX_SANDBOX_POOL):
+        self._max_size = max_size
+        self._pool: dict[tuple[str, str, str], tuple[str | None, asyncio.Lock]] = {}
+
+    async def get_or_create(
+        self, tenant: str, channel: str, thread_ts: str
+    ) -> tuple[str | None, asyncio.Lock]:
+        key = (tenant, channel, thread_ts)
+        if key not in self._pool:
+            self._pool[key] = (None, asyncio.Lock())
+        return self._pool[key]
+
+    def update(self, tenant: str, channel: str, thread_ts: str, sandbox_id: str | None) -> None:
+        key = (tenant, channel, thread_ts)
+        if key in self._pool:
+            _, lock = self._pool[key]
+            self._pool[key] = (sandbox_id, lock)
+
+    def clear(self, tenant: str, channel: str, thread_ts: str) -> None:
+        key = (tenant, channel, thread_ts)
+        if key in self._pool:
+            _, lock = self._pool[key]
+            self._pool[key] = (None, lock)
+
+    def set_initial(
+        self, tenant: str, channel: str, thread_ts: str, sandbox_id: str | None
+    ) -> None:
+        key = (tenant, channel, thread_ts)
+        if key not in self._pool:
+            self._pool[key] = (sandbox_id, asyncio.Lock())
+
+    def has_key(self, tenant: str, channel: str, thread_ts: str) -> bool:
+        return (tenant, channel, thread_ts) in self._pool
+
+    def evict_if_needed(self) -> None:
+        while len(self._pool) > self._max_size:
+            oldest_key = next(iter(self._pool))
+            evicted_id, _ = self._pool.pop(oldest_key)
+            if evicted_id:
+                logger.debug("Evicted sandbox %s from pool", evicted_id)
+
+    def size(self) -> int:
+        return len(self._pool)

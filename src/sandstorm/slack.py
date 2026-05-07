@@ -20,6 +20,7 @@ from .store import build_config_snapshot, run_store
 from .platform import (
     BINARY_MIME_PREFIXES as _BINARY_MIME_PREFIXES,
     MAX_FILE_SIZE as _MAX_FILE_SIZE,
+    SandboxPoolManager,
     build_query_request as _build_query_request,
     gather_thread_context as _gather_thread_context,
     unique_filename as _unique_filename,
@@ -29,9 +30,6 @@ if TYPE_CHECKING:
     from slack_bolt.async_app import AsyncApp
 
 logger = logging.getLogger(__name__)
-
-# Max sandbox pool entries (one per active thread)
-_MAX_SANDBOX_POOL = 1000
 
 
 # ── Metadata blocks ──────────────────────────────────────────────────────────
@@ -454,7 +452,7 @@ def create_slack_app(
 
     # Sandbox reuse pool: (team_id, channel, thread_ts) -> (sandbox_id, lock).
     # Lock serializes concurrent @mentions in the same thread.
-    _sandbox_pool: dict[tuple[str, str, str], tuple[str | None, asyncio.Lock]] = {}
+    _sandbox_pool = SandboxPoolManager()
 
     # Per-user-per-channel model override from /model. In-memory only:
     # intentionally lost on restart so overrides don't outlive the process.
@@ -528,19 +526,17 @@ def create_slack_app(
     ) -> dict:
         """Run agent with sandbox reuse, pool management, and eviction."""
         tenant = context.get("enterprise_id") or context.get("team_id") or ""
-        key = (tenant, channel, thread_ts)
-        if key not in _sandbox_pool:
-            # Cold start (or server restart). Look up the prior Run for this
-            # thread and resume its paused sandbox if it still exists; E2B's
-            # connect() auto-resumes. On failure the generic reuse-error path
-            # handles the fallback.
+
+        if not _sandbox_pool.has_key(tenant, channel, thread_ts):
             prior = run_store.find_thread_session(tenant, channel, thread_ts)
             initial_id = prior.sandbox_id if prior else None
-            _sandbox_pool[key] = (initial_id, asyncio.Lock())
-        _, lock = _sandbox_pool[key]
+            _sandbox_pool.set_initial(tenant, channel, thread_ts, initial_id)
+
+        existing_sandbox_id, lock = await _sandbox_pool.get_or_create(tenant, channel, thread_ts)
 
         async with lock:
-            existing_sandbox_id = _sandbox_pool[key][0]
+            # Re-read after acquiring lock (another coroutine may have updated it)
+            existing_sandbox_id, _ = await _sandbox_pool.get_or_create(tenant, channel, thread_ts)
             sandbox_id_out: list[str] = []
             reuse_succeeded = False
             if existing_sandbox_id:
@@ -570,7 +566,7 @@ def create_slack_app(
                 )
                 reuse_succeeded = not metadata.get("error")
                 if not reuse_succeeded:
-                    _sandbox_pool[key] = (None, lock)
+                    _sandbox_pool.clear(tenant, channel, thread_ts)
                     logger.warning(
                         "[%s] Sandbox %s failed, creating new",
                         run_id,
@@ -602,18 +598,10 @@ def create_slack_app(
                     binary_files=binary_files or None,
                 )
                 new_id = sandbox_id_out[0] if sandbox_id_out else None
-                _sandbox_pool.pop(key, None)
-                _sandbox_pool[key] = (new_id, lock)
+                _sandbox_pool.update(tenant, channel, thread_ts, new_id)
 
         # Evict oldest entries if pool is too large
-        while len(_sandbox_pool) > _MAX_SANDBOX_POOL:
-            oldest_key = next(iter(_sandbox_pool))
-            evicted_id, _ = _sandbox_pool.pop(oldest_key)
-            if evicted_id:
-                logger.debug(
-                    "Evicted sandbox %s from pool (will auto-expire)",
-                    evicted_id,
-                )
+        _sandbox_pool.evict_if_needed()
 
         return metadata
 

@@ -82,3 +82,41 @@ class TestUniqueFilename:
         seen: set[str] = set()
         unique_filename("README", seen)
         assert unique_filename("README", seen) == "README_1"
+
+
+import asyncio
+from sandstorm.platform import SandboxPoolManager
+
+
+class TestSandboxPoolManager:
+    def test_get_or_create_returns_none_for_new_key(self):
+        pool = SandboxPoolManager(max_size=10)
+        sandbox_id, lock = asyncio.run(pool.get_or_create("tenant", "chan", "ts"))
+        assert sandbox_id is None
+        assert lock is not None
+
+    def test_update_stores_sandbox_id(self):
+        pool = SandboxPoolManager(max_size=10)
+        asyncio.run(pool.get_or_create("tenant", "chan", "ts"))
+        pool.update("tenant", "chan", "ts", "sbx-123")
+        sandbox_id, _ = asyncio.run(pool.get_or_create("tenant", "chan", "ts"))
+        assert sandbox_id == "sbx-123"
+
+    def test_clear_resets_sandbox_id(self):
+        pool = SandboxPoolManager(max_size=10)
+        asyncio.run(pool.get_or_create("tenant", "chan", "ts"))
+        pool.update("tenant", "chan", "ts", "sbx-123")
+        pool.clear("tenant", "chan", "ts")
+        sandbox_id, _ = asyncio.run(pool.get_or_create("tenant", "chan", "ts"))
+        assert sandbox_id is None
+
+    def test_evicts_oldest_when_full(self):
+        pool = SandboxPoolManager(max_size=2)
+        asyncio.run(pool.get_or_create("t", "c", "ts1"))
+        pool.update("t", "c", "ts1", "sbx-1")
+        asyncio.run(pool.get_or_create("t", "c", "ts2"))
+        pool.update("t", "c", "ts2", "sbx-2")
+        # Adding a third should evict the first
+        asyncio.run(pool.get_or_create("t", "c", "ts3"))
+        pool.evict_if_needed()
+        assert pool.size() <= 2
