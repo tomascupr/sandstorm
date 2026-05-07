@@ -7,6 +7,7 @@ import logging
 import time
 
 from .memory import memory_store
+from .platform import BINARY_MIME_PREFIXES, MAX_FILE_SIZE, unique_filename
 from .store import run_store
 
 logger = logging.getLogger(__name__)
@@ -181,6 +182,93 @@ def dispatch_slash_command(
         return {"text": f"Run `{run.id}` is already finishing."}
 
     return {"text": "Unknown command."}
+
+async def fetch_thread_messages(service, space_name: str, thread_key: str) -> list[dict]:
+    """Fetch all messages in a Google Chat thread.
+
+    Returns normalized message dicts: {user, text, files}
+    """
+    try:
+        response = await asyncio.to_thread(
+            service.spaces().messages().list(
+                parent=space_name,
+                filter=f'thread.name = "{thread_key}"',
+            ).execute
+        )
+        raw_messages = response.get("messages", [])
+        normalized = []
+        for msg in raw_messages:
+            sender = msg.get("sender", {})
+            user = sender.get("name", "unknown")
+            text = msg.get("text", "").strip()
+            files = []
+            for attachment in msg.get("attachment", []):
+                data_ref = attachment.get("attachmentDataRef", {})
+                files.append({
+                    "name": attachment.get("name", "unknown"),
+                    "mimetype": attachment.get("contentType", "application/octet-stream"),
+                    "size": int(data_ref.get("length", 0)),
+                    "resource_name": data_ref.get("resourceName", ""),
+                })
+            entry: dict = {"user": user, "text": text}
+            if files:
+                entry["files"] = files
+            normalized.append(entry)
+        return normalized
+    except Exception:
+        logger.warning("Failed to fetch thread messages", exc_info=True)
+        return []
+
+
+async def download_thread_files(
+    service, messages: list[dict], bot_user_id: str
+) -> tuple[dict[str, str], dict[str, bytes]]:
+    """Download files from Google Chat thread messages.
+
+    Returns (text_files, binary_files) matching the Slack function signature.
+    """
+    text_files: dict[str, str] = {}
+    binary_files: dict[str, bytes] = {}
+    seen: set[str] = set()
+
+    for msg in messages:
+        if msg.get("user") == bot_user_id:
+            continue
+
+        for f in msg.get("files", []):
+            raw_name = f.get("name", "unknown")
+            name = unique_filename(raw_name, seen)
+            mimetype = f.get("mimetype", "")
+            size = f.get("size", 0)
+            is_binary = any(mimetype.startswith(prefix) for prefix in BINARY_MIME_PREFIXES)
+            resource_name = f.get("resource_name", "")
+
+            if size > MAX_FILE_SIZE:
+                logger.warning("Skipping large file: %s (%d bytes)", name, size)
+                continue
+
+            if not resource_name:
+                continue
+
+            try:
+                response = await asyncio.to_thread(
+                    service.media().download(resourceName=resource_name).execute
+                )
+                if is_binary:
+                    binary_files[name] = response
+                else:
+                    binary_files[name] = response  # treat unknown as binary
+                    # Try to decode as text
+                    try:
+                        text_files[name] = response.decode("utf-8")
+                        del binary_files[name]
+                    except (UnicodeDecodeError, AttributeError):
+                        pass
+            except Exception:
+                logger.warning("Failed to download file: %s", name, exc_info=True)
+
+    return text_files, binary_files
+
 
 FLUSH_INTERVAL = 2.0
 

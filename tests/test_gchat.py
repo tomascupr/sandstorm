@@ -195,3 +195,22 @@ class TestGChatAppHome:
         card = build_home_card(team_id="T1", user_id="U1")
         sections = card["card"].get("sections", [])
         assert len(sections) >= 1
+
+
+class TestGChatFileDownload:
+    def test_classifies_binary_files(self):
+        from sandstorm.platform import BINARY_MIME_PREFIXES
+        assert any("image/png".startswith(p) for p in BINARY_MIME_PREFIXES)
+        assert not any("text/plain".startswith(p) for p in BINARY_MIME_PREFIXES)
+
+
+class TestGChatThreadContext:
+    def test_fetch_and_format_thread(self):
+        from sandstorm.platform import gather_thread_context
+        messages = [
+            {"user": "users/123", "text": "Help with this"},
+            {"user": "BOT_ID", "text": "Working on it..."},
+        ]
+        result = gather_thread_context(messages, "BOT_ID")
+        assert "[users/123] Help with this" in result
+        assert "[Sandstorm] Working on it..." in result
