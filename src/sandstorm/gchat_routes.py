@@ -23,8 +23,8 @@ def _verify_google_chat_jwt(auth_header: str) -> bool:
         logger.warning("GOOGLE_CHAT_PROJECT_NUMBER not set — cannot verify JWT")
         return False
     try:
-        from google.oauth2 import id_token
         from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
 
         claim = id_token.verify_token(
             token,
@@ -88,9 +88,8 @@ async def _handle_card_clicked(body: dict) -> dict:
         user = body.get("user", {}).get("name", "")
         if run_id and sentiment:
             run_store.set_feedback(run_id, sentiment, user)
-        return {
-            "text": f"{'\U0001f44d' if sentiment == 'positive' else '\U0001f44e'} Feedback recorded. Thanks!"
-        }
+        emoji = "\U0001f44d" if sentiment == "positive" else "\U0001f44e"
+        return {"text": f"{emoji} Feedback recorded. Thanks!"}
 
     if method == "sandstorm_cancel_run":
         from .cancellation import request_cancellation
@@ -115,14 +114,13 @@ async def _handle_reaction(body: dict) -> dict:
     """Handle REACTION_ADDED events — match against triggers."""
     from .config import load_sandstorm_config
     from .gchat import unicode_to_shortcode
-    from .triggers import load_triggers, render_prompt
+    from .triggers import load_triggers
 
     emoji_unicode = body.get("reaction", {}).get("unicode", "")
     shortcode = unicode_to_shortcode(emoji_unicode)
     if not shortcode:
         return {}
 
-    message = body.get("message", {})
     space_name = body.get("space", {}).get("name", "")
 
     config = load_sandstorm_config()

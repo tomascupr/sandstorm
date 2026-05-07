@@ -253,7 +253,9 @@ class StreamBridge:
                                     has_streamed_text = True
                                     logger.info("[%s] Streamed %d chars", run_id, len(text))
                                 except Exception:
-                                    logger.error("[%s] streamer.append failed", run_id, exc_info=True)
+                                    logger.error(
+                                        "[%s] streamer.append failed", run_id, exc_info=True
+                                    )
                         elif block.get("type") == "tool_use":
                             tool_name = block.get("name", "unknown")
                             logger.info("[%s] Tool: %s", run_id, tool_name)
@@ -315,7 +317,8 @@ class StreamBridge:
                     logger.error("[%s] Agent error: %s", run_id, error_msg)
 
                     try:
-                        await self._streamer.append(markdown_text=f"\n:warning: Error: {error_msg}")
+                        err_text = f"\n:warning: Error: {error_msg}"
+                        await self._streamer.append(markdown_text=err_text)
                         await self._streamer.stop()
                         stopped = True
                     except Exception:
