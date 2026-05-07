@@ -159,14 +159,44 @@ class TestGChatCardClicked:
         assert resp.status_code == 200
         assert "Feedback" in resp.json().get("text", "")
 
-    def test_cancel_run(self, monkeypatch):
-        with patch("sandstorm.cancellation.request_cancellation", return_value=True) as mock_cancel:
+    def test_cancel_run_ownership_check(self, monkeypatch, tmp_path):
+        from sandstorm.store import RunStore
+
+        store = RunStore(path=tmp_path / "runs.jsonl")
+        store.create(
+            id="run123", prompt="test", model="sonnet",
+            files_count=0, raw_prompt="test",
+            team_id="spaces/abc", user_id="users/123",
+            channel_id="spaces/abc", thread_ts="t1",
+        )
+        with (
+            patch("sandstorm.store.run_store", store),
+            patch("sandstorm.cancellation.request_cancellation", return_value=True),
+        ):
             resp = self._post_card_click(
                 monkeypatch, "sandstorm_cancel_run",
                 {"run_id": "run123"},
             )
         assert resp.status_code == 200
-        assert "Cancelled" in resp.json().get("text", "") or "Cancel" in resp.json().get("text", "")
+        assert "Cancelled" in resp.json().get("text", "")
+
+    def test_cancel_run_wrong_user(self, monkeypatch, tmp_path):
+        from sandstorm.store import RunStore
+
+        store = RunStore(path=tmp_path / "runs.jsonl")
+        store.create(
+            id="run456", prompt="test", model="sonnet",
+            files_count=0, raw_prompt="test",
+            team_id="spaces/abc", user_id="users/999",
+            channel_id="spaces/abc", thread_ts="t1",
+        )
+        with patch("sandstorm.store.run_store", store):
+            resp = self._post_card_click(
+                monkeypatch, "sandstorm_cancel_run",
+                {"run_id": "run456"},
+            )
+        assert resp.status_code == 200
+        assert "not yours" in resp.json().get("text", "").lower() or "not found" in resp.json().get("text", "").lower()
 
     def test_forget_memory(self, monkeypatch, tmp_path):
         from sandstorm.memory import MemoryStore

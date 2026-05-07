@@ -93,9 +93,19 @@ async def _handle_card_clicked(body: dict) -> dict:
 
     if method == "sandstorm_cancel_run":
         from .cancellation import request_cancellation
+        from .store import run_store
+
         run_id = params.get("run_id", "")
-        if run_id:
-            request_cancellation(run_id)
+        user = body.get("user", {}).get("name", "")
+        space = body.get("space", {}).get("name", "")
+        if not run_id:
+            return {"text": "No run to cancel."}
+        run = run_store.get(run_id)
+        if run is None or run.team_id != space or run.user_id != user:
+            return {"text": "Run not found or not yours."}
+        if run.status != "running":
+            return {"text": f"Run `{run_id}` is already finished."}
+        request_cancellation(run_id)
         return {"text": f"Cancelled run `{run_id}`."}
 
     if method == "sandstorm_forget_memory":
