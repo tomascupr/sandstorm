@@ -1,5 +1,7 @@
 # Sandstorm
 
+[![Deploy to Railyard](https://app.railyard.run/deploy/badge)](https://app.railyard.run/deploy?repo=https://github.com/tomascupr/sandstorm)
+
 **Claude Agent SDK, or any LLM, as a sandboxed agent in your Slack, on your infra.**
 
 CLI, HTTP API, Python client, Slack bot, and repo-local TypeScript client source over
